@@ -28,27 +28,29 @@ struct MenuView: View {
             }
             .padding(16)
 
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Noise removal").font(.system(size: 12, weight: .medium))
-                    Text(controller.noiseRemoval ? "Reduce background noise" : "Your original voice passes through")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+            if !controller.testing {  // one control at a time: the test has its own Original | Cleaned
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Noise removal").font(.system(size: 12, weight: .medium))
+                        Text(controller.noiseRemoval ? "Reduce background noise" : "Your original voice passes through")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Toggle("Noise removal", isOn: $controller.noiseRemoval)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .help("Off sends your original voice without noise removal")
                 }
-                Spacer()
-                Toggle("Noise removal", isOn: $controller.noiseRemoval)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .help("Off sends your original voice without noise removal")
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
 
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Hear yourself").font(.system(size: 12, weight: .medium))
-                    Text(controller.testing ? "Playing in \(controller.headphoneName)"
+                    Text(controller.testing ? "Playing in \(controller.headphoneName). Calls aren't affected."
                          : controller.testBlocker ?? "Test in your headphones before a call")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
