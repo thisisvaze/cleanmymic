@@ -30,11 +30,11 @@ unavailable, tell me exactly what is missing before making system changes.
 
 ## Hear it
 
-Three 10-second clips from real office, call-center, and car recordings with strong background noise; no noise was added. Play the original, CleanMyMic Base, and Krisp or DeepFilterNet3 side by side at the same volume:
+Three 10-second clips from real office, call-center, and car recordings with strong background noise; no noise was added. Play the original next to CleanMyMic Base, with two other noise removers for comparison, at the same volume:
 
 **[▶ Listen in your browser](https://thisisvaze.github.io/cleanmymic/audio/)**
 
-Audio © Krisp Technologies · CC BY-NC 4.0 · [Sources and method →](docs/audio/README.md)
+[Sources, credits, and method →](docs/audio/README.md)
 
 ## Lightweight
 
