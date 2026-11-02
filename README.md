@@ -2,7 +2,7 @@
 
 # CleanMyMic
 
-Experimental microphone cleanup for Mac, processed locally with Core ML. Choose CleanMyMic in your call app, then switch noise removal on for cleaned audio or off for your original voice. Your physical microphone is chosen automatically.
+Experimental microphone cleanup for Mac, processed locally with Core ML. Choose CleanMyMic in your call app, then switch it on for cleaned audio or off for your original voice. Your physical microphone is chosen automatically.
 
 **v0.1.0-alpha.1 — Experimental preview.** One installer bundles the app, virtual microphone, and Base model. [Download from Releases →](https://github.com/thisisvaze/cleanmymic/releases/latest) · [Release notes →](docs/releases/v0.1.0-alpha.1.md)
 

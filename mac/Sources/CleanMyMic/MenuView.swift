@@ -20,79 +20,69 @@ struct MenuView: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CleanMyMic").font(.system(size: 14, weight: .semibold))
-                    Text(stateLabel)
+                    Text(controller.noiseRemoval || controller.testing ? stateLabel : "Off · \(stateLabel)")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-            }
-            .padding(16)
-
-            if !controller.testing {  // one control at a time: the test has its own Original | Cleaned
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Noise removal").font(.system(size: 12, weight: .medium))
-                        Text(controller.noiseRemoval ? "Reduce background noise" : "Your original voice passes through")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Toggle("Noise removal", isOn: $controller.noiseRemoval)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .help("Off sends your original voice without noise removal")
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-            }
-
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Hear yourself").font(.system(size: 12, weight: .medium))
-                    Text(controller.testing ? "Playing in \(controller.headphoneName). Calls aren't affected."
-                         : controller.testBlocker ?? "Test in your headphones before a call")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Toggle("Hear yourself", isOn: $controller.testing)
+                Toggle("CleanMyMic", isOn: $controller.noiseRemoval)  // the main switch: what calls get
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .disabled(!controller.testing && controller.testBlocker != nil)
-                    .help("Plays your microphone to your headphones while this panel is open")
+                    .disabled(controller.testing)  // the test has its own Original | Cleaned
+                    .help(controller.testing ? "Calls keep this setting during the test"
+                          : "Off sends your original voice, uncleaned")
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, controller.testing ? 10 : 16)
+            .padding(16)
 
-            if controller.testing {
-                Picker("Compare", selection: $controller.testCleaned) {
-                    Text("Original").tag(false)
-                    Text("Cleaned").tag(true)
+            if controller.noiseRemoval {  // off: just the switch, like Bluetooth
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Hear yourself").font(.system(size: 12, weight: .medium))
+                        Text(controller.testing ? "Playing in \(controller.headphoneName). Calls aren't affected."
+                             : controller.testBlocker ?? "Test in your headphones before a call")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Toggle("Hear yourself", isOn: $controller.testing)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .disabled(!controller.testing && controller.testBlocker != nil)
+                        .help("Plays your microphone to your headphones while this panel is open")
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .help("Only for this test; calls keep the Noise removal setting")
                 .padding(.horizontal, 16)
-                .padding(.bottom, 16)
+                .padding(.bottom, controller.testing ? 10 : 16)
+
+                if controller.testing {
+                    Picker("Compare", selection: $controller.testCleaned) {
+                        Text("Original").tag(false)
+                        Text("Cleaned").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .help("Only for this test; calls keep the main switch setting")
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                }
+
+                MicrophoneMenu(selection: $controller.inputUID, devices: controller.microphones,
+                               deviceName: controller.microphoneName)
+                .padding(.horizontal, 12)
+                .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.06)))
+                .padding(.horizontal, 16)
+
+                Text("Choose CleanMyMic as the microphone in your call app.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(16)
             }
-
-            MicrophoneMenu(selection: $controller.inputUID, devices: controller.microphones,
-                           deviceName: controller.microphoneName)
-            .padding(.horizontal, 12)
-            .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.06)))
-            .padding(.horizontal, 16)
-
-            Text("Choose CleanMyMic as the microphone in your call app.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(16)
 
             if stateLabel == "Needs attention" {
                 Text(controller.status)
@@ -137,7 +127,7 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Settings").font(.headline)
             HStack {
-                Text("Noise removal strength").font(.system(size: 12))
+                Text("Cleanup strength").font(.system(size: 12))
                 Spacer()
                 Text(controller.strength, format: .percent.precision(.fractionLength(0)))
                     .font(.system(size: 11).monospacedDigit())
@@ -146,9 +136,9 @@ struct MenuView: View {
             }
             Slider(value: $controller.strength, in: 0...1)
                 .controlSize(.small)
-                .accessibilityLabel("Noise removal strength")
+                .accessibilityLabel("Cleanup strength")
                 .accessibilityValue(Text(controller.strength, format: .percent.precision(.fractionLength(0))))
-            Text("Used when noise removal is on.")
+            Text("Used when CleanMyMic is switched on.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
