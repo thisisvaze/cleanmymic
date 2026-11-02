@@ -1,0 +1,114 @@
+{
+  "selection": "Screened 94 original recordings, selecting a higher low-level frame RMS relative to speech peaks, then excerpt starts near annotated speech boundaries. No processed outputs used for selection. Frame-level proxy is not an SNR measurement.",
+  "clips": [
+    {
+      "category": "work",
+      "id": "176",
+      "start_seconds": 59,
+      "duration_seconds": 10,
+      "device": "apple_earpods_2",
+      "environment": "big_room",
+      "playback_gain": 1.204269343963191,
+      "input_level_proxy": {
+        "p20_dbfs": -35.040718463973754,
+        "p90_dbfs": -21.61447262074251,
+        "gap_db": 13.426245843231243,
+        "previous_clip_gap_db": 21.056537308379987
+      }
+    },
+    {
+      "category": "call_center",
+      "id": "030",
+      "start_seconds": 85,
+      "duration_seconds": 10,
+      "device": "jabra_evolve_10",
+      "environment": "callcenter1",
+      "playback_gain": 1.8782784793082108,
+      "input_level_proxy": {
+        "p20_dbfs": -42.092632079393624,
+        "p90_dbfs": -25.475199650623352,
+        "gap_db": 16.61743242877027,
+        "previous_clip_gap_db": 25.38368541667719
+      }
+    },
+    {
+      "category": "phone_calls",
+      "id": "166",
+      "start_seconds": 1,
+      "duration_seconds": 10,
+      "device": "car_bluetooth",
+      "environment": "car",
+      "playback_gain": 3.147658484974942,
+      "input_level_proxy": {
+        "p20_dbfs": -43.49445382830477,
+        "p90_dbfs": -29.95975212217322,
+        "gap_db": 13.53470170613155,
+        "previous_clip_gap_db": 40.59911073074632
+      }
+    }
+  ],
+  "sample_rate": 32000,
+  "sources": {
+    "work-raw.wav": {
+      "url": "https://huggingface.co/datasets/Krisp-AI/VoiceIsolation-Benchmark-Dataset/resolve/626bac8ca07fb9b4846d4f62d27c321753160b36/work/176.wav",
+      "sha256": "64ff07160002ed74c80a52565f77424cbd3bc8d6f2f055728b9ce3ceab1c47d8",
+      "bytes": 6179784
+    },
+    "work-krisp.wav": {
+      "url": "https://huggingface.co/datasets/Krisp-AI/VoiceIsolation-Benchmark-Dataset-Processed/resolve/8759715197e39e0356125e3f3197a9854c38fa60/work/vi_2_5_hd/176.wav",
+      "sha256": "c0434fadb1b3d5a5633beeb6566d2ba917b27af2b12048d75d85c46f00b14dd8",
+      "bytes": 6179750
+    },
+    "call_center-raw.wav": {
+      "url": "https://huggingface.co/datasets/Krisp-AI/VoiceIsolation-Benchmark-Dataset/resolve/626bac8ca07fb9b4846d4f62d27c321753160b36/call_center/030.wav",
+      "sha256": "d66699776fce27026d5caa99fd538b7490e35c1601e8f6422a92224e3fdc7f3b",
+      "bytes": 8711938
+    },
+    "call_center-krisp.wav": {
+      "url": "https://huggingface.co/datasets/Krisp-AI/VoiceIsolation-Benchmark-Dataset-Processed/resolve/8759715197e39e0356125e3f3197a9854c38fa60/call_center/vi_2_5_hd/030.wav",
+      "sha256": "0555ec812491be2d5300ba27dd048c87d1a57be936350204f52d1a26810928df",
+      "bytes": 8711904
+    },
+    "phone_calls-raw.wav": {
+      "url": "https://huggingface.co/datasets/Krisp-AI/VoiceIsolation-Benchmark-Dataset/resolve/626bac8ca07fb9b4846d4f62d27c321753160b36/phone_calls/166.wav",
+      "sha256": "9575a57c25ee298ee35be2fe32a6240d5be409f9c8a2cafc30edfff19d9fd4cd",
+      "bytes": 2158158
+    },
+    "phone_calls-krisp.wav": {
+      "url": "https://huggingface.co/datasets/Krisp-AI/VoiceIsolation-Benchmark-Dataset-Processed/resolve/8759715197e39e0356125e3f3197a9854c38fa60/phone_calls/vi_2_5_hd/166.wav",
+      "sha256": "4d610bf0d6e15bfd47bd0fd1c37e8dc173dccb7a2091e4234fb13bdbee8030e5",
+      "bytes": 2158078
+    }
+  },
+  "models": {
+    "cleanmymic_base": {
+      "checkpoint_sha256": "20e1b4792ec7698473f38815f2d7a22b02ae0a2a98f882048373514e4c3a6c03",
+      "coreml_weights_sha256": "a8896e66f673dd54b7251577806d51685d2def46c918310c73a95ca6319373bc",
+      "strength": 1.0,
+      "enrollment": false
+    },
+    "deepfilternet3": {
+      "checkpoint_sha256": "23b92884f63ccf54bb026014604625ab231657b6480df65db4095c4c171e6003",
+      "coreml_weights_sha256": "2e76e17eb8d780a6e46ab518c4e00ef4ec1dc914d15d7fab2dfba1aad8780d93",
+      "runner": "CleanMyMic Core ML port; no post-filter"
+    },
+    "krisp": "Published VI 2.5 HD; no claim about the current Krisp Mac app"
+  },
+  "license": "CC-BY-NC-4.0",
+  "file_sha256": {
+    "work-raw.wav": "81c5fffd3b56d53d51d02ae1a52a77152cd001624b93e5f552fd667df7e7df9b",
+    "work-krisp.wav": "f8cd47cf1f410f09f25e66996565681877f8ccee10c27401dcc0ffd706927245",
+    "work-base.wav": "632222bad051851a5c6d77166eee29554ec364b22366b2b371d9589a55e04656",
+    "work-dfn3.wav": "41df123d65081cf702443c5d270a71e452900b0f20946a09c3a365862401ab34",
+    "call_center-raw.wav": "6f4260ea6564af347c29b77bfffcb2fd39422b173769046371a61ea3bb231d64",
+    "call_center-krisp.wav": "d512db0817802da584e229395094a2cee7c944b81cb421fb29b58fa0dfff2c06",
+    "call_center-base.wav": "7be0d3dfee3a12c8541cf3474485083ba0f9fa28b87b9d98505be4f74aff6e51",
+    "call_center-dfn3.wav": "1128b5c2fc811b6ea72720ec67c742c8a3a87a23e8e4008d876c29ee453ef862",
+    "phone_calls-raw.wav": "bca29e51358cfc2695e5d0b99f87ea7b92de193ae57d89620a6b4c50a5514907",
+    "phone_calls-krisp.wav": "ea06c109801de8e7a2d38c2ac33e6ee54d5f437c2d6cbffee2775bc397f0f24c",
+    "phone_calls-base.wav": "dce9b5e1bd2dd07b7d466761600b1ddb3f670ac3a85f98eaa2ebfb2c59bd46cf",
+    "phone_calls-dfn3.wav": "6717caf5f4897b8a9845185f3ac58ed8aa2cdb11f6f668eeff09509a71a3fb30"
+  },
+  "playback_gain_method": "One common linear gain per case for all four versions, targeting -20 dBFS for the original audio 90th-percentile 20 ms frame RMS. Gain is capped to keep every version below 0.95 peak. No per-output normalization or added noise.",
+  "screening_proxy": "20th- and 90th-percentile RMS of non-overlapping 20 ms original-audio frames. A smaller gap helped locate prominent backgrounds; this is not a separated-noise SNR measurement or a model score."
+}

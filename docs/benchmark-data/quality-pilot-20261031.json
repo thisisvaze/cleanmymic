@@ -1,0 +1,884 @@
+{
+  "status": "Fresh development comparison; Hold retained; neither fine-tune promoted",
+  "date_utc": "2026-10-31",
+  "hardware": "Nebius Finland eu-north1; NVIDIA H100 80 GB",
+  "systems": {
+    "hold-10000-novoice": {
+      "description": "Current app default, no enrollment, full strength",
+      "checkpoint_sha256": "20e1b4792ec7698473f38815f2d7a22b02ae0a2a98f882048373514e4c3a6c03"
+    },
+    "control-2000-novoice": {
+      "description": "Hold continued 2000 steps",
+      "checkpoint_sha256": "9873fb2f928b85f1265e4c197b75c936dee109e5199985b261f899980fcd7d16"
+    },
+    "near-2000-novoice": {
+      "description": "Hold continued 2000 steps with corrected near/far rooms",
+      "checkpoint_sha256": "f7737410860c13acd744b86de6d322c5af2ad6cc032b771c2d7521bffaded8cf"
+    },
+    "dfn3": {
+      "description": "Stock DeepFilterNet3 0.5.6 default CLI outputs, 48 kHz PCM16",
+      "checkpoint_sha256": "23b92884f63ccf54bb026014604625ab231657b6480df65db4095c4c171e6003"
+    },
+    "krisp-hd": {
+      "description": "Published Krisp VI 2.5 HD output files, 32 kHz PCM16; not the current Mac app"
+    }
+  },
+  "training": {
+    "arch": "dfn3",
+    "enrol": true,
+    "studio": true,
+    "sources": true,
+    "memmap": true,
+    "dehiss": true,
+    "babble": true,
+    "hold": true,
+    "lr": 5e-05,
+    "steps": 2000,
+    "decay": 1000,
+    "asym": 2.0
+  },
+  "training_difference": "Only --near differs; same Hold initializer and training budget. Single runs, not repeated training seeds.",
+  "aggregation": "Mean clip WER capped at 1; corpus WER uncapped. Common reference and raw-input transcripts from fresh Hold pass; each output has its own fresh ASR transcript.",
+  "source_csv_sha256": {
+    "hold-10000-novoice": "e2244f292a6feec933f1e57746073aea2b897c2298113ba805cc03086f77067c",
+    "control-2000-novoice": "4e5c85884ff812aa6ac62b3c92d076c3792f92dbd1abf76762426f1705cab747",
+    "near-2000-novoice": "4eb744d7ae4267f0cb4a61e6c75e85c71ab0ffcbc9f5c01de6d3e87ca578c685",
+    "dfn3": "d96ae9acac2f77910d391ca531d1cefb52d2df327bd804a0e5603d19497d1384",
+    "krisp-hd": "5290315ab6543da9b465698e0a4d4437deebdfd28e148dc5ca2adaa695c60913"
+  },
+  "runtime": {
+    "packages": {
+      "torch": "2.14.1+cu130",
+      "transformers": "5.20.2",
+      "audiobox-aesthetics": "0.0.4",
+      "jiwer": "4.0.0",
+      "numpy": "2.5.4",
+      "soundfile": "0.14.0"
+    },
+    "huggingface_cached_main": {
+      "openai/whisper-large-v3-turbo": "41f01f3fe87f28c78e2fbf8b568835947dd65ed9",
+      "microsoft/wavlm-base-plus-sv": "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e"
+    },
+    "source_sha256": {
+      "train/data.py": "e79057903795298d6814f7a7f46f5fc974f43d4a1956ad874b0e4655e36e1c31",
+      "train/train.py": "a468aefac23cdd0f9dd1b1304d8bac8847ae5878edefa1d3076dcecae225b7c3",
+      "eval/score.py": "9ac7d45814ed6a032df019c4fdcbfb6a9b204ea7a5b3c5034a6d889895cde215",
+      "train/dfn3.py": "602217b01ff21e271a5c2a68f34a2e2d446fb634a92843ac806282c02df1891c"
+    }
+  },
+  "metadata_sha256": {
+    "work": "8b83efb723c86513ca64e0752bd14b1ccebfe5231105b3004736bab916a6d476",
+    "call": "d8daaa927d8082617efc98902b9ce15b9ee3295c439d46aff4575699a8535e02",
+    "phone": "30fd5bfb7e52b31d64f8c9d4b46fb2f359eef3543fdece83f555b1fa1c63d461"
+  },
+  "common_format_method": "All outputs represented at 48 kHz and quantized to PCM16 with libsndfile-equivalent floor(x*32768), clipped to [-32768,32767]. No inference or ASR repeated for this sensitivity check. Existing quantization of competitor outputs cannot be undone. Native-rate/bandwidth differences remain.",
+  "common_format": {
+    "krisp-hd": {
+      "krisp-work": {
+        "clips": 40,
+        "clipped_files": 3,
+        "native_other_db": -31.038853535056113,
+        "pcm16_other_db": -30.954024228453637
+      },
+      "krisp-call": {
+        "clips": 39,
+        "clipped_files": 6,
+        "native_other_db": -29.96591960466825,
+        "pcm16_other_db": -29.357729117075603
+      },
+      "krisp-phone": {
+        "clips": 4,
+        "clipped_files": 0,
+        "native_other_db": -17.933162331581116,
+        "pcm16_other_db": -17.906942009925842
+      }
+    },
+    "dfn3": {
+      "krisp-work": {
+        "clips": 40,
+        "clipped_files": 0,
+        "native_other_db": -14.840628497302532,
+        "pcm16_other_db": -14.840628497302532
+      },
+      "krisp-call": {
+        "clips": 39,
+        "clipped_files": 0,
+        "native_other_db": -18.62232975852795,
+        "pcm16_other_db": -18.62232975852795
+      },
+      "krisp-phone": {
+        "clips": 4,
+        "clipped_files": 0,
+        "native_other_db": -37.390905410051346,
+        "pcm16_other_db": -37.390905410051346
+      }
+    },
+    "hold-10000-novoice": {
+      "krisp-work": {
+        "clips": 40,
+        "clipped_files": 6,
+        "native_other_db": -36.689251583814624,
+        "pcm16_other_db": -32.25614977478981
+      },
+      "krisp-call": {
+        "clips": 39,
+        "clipped_files": 6,
+        "native_other_db": -35.45879197731996,
+        "pcm16_other_db": -29.551891192411766
+      },
+      "krisp-phone": {
+        "clips": 4,
+        "clipped_files": 2,
+        "native_other_db": -5.950166307389736,
+        "pcm16_other_db": -5.949635051190853
+      }
+    },
+    "control-2000-novoice": {
+      "krisp-work": {
+        "clips": 40,
+        "clipped_files": 7,
+        "native_other_db": -37.53294917345047,
+        "pcm16_other_db": -32.79047685265541
+      },
+      "krisp-call": {
+        "clips": 39,
+        "clipped_files": 6,
+        "native_other_db": -35.81492993770502,
+        "pcm16_other_db": -29.767431748219025
+      },
+      "krisp-phone": {
+        "clips": 4,
+        "clipped_files": 3,
+        "native_other_db": -6.435333162546158,
+        "pcm16_other_db": -6.434470616281033
+      }
+    },
+    "near-2000-novoice": {
+      "krisp-work": {
+        "clips": 40,
+        "clipped_files": 7,
+        "native_other_db": -36.050834509730336,
+        "pcm16_other_db": -31.802307261526586
+      },
+      "krisp-call": {
+        "clips": 39,
+        "clipped_files": 6,
+        "native_other_db": -34.00545298747527,
+        "pcm16_other_db": -28.84672608742347
+      },
+      "krisp-phone": {
+        "clips": 4,
+        "clipped_files": 3,
+        "native_other_db": -6.784226901829243,
+        "pcm16_other_db": -6.7834640219807625
+      }
+    }
+  },
+  "wav_export_regression": {
+    "model_float": -70.82380676269531,
+    "PCM_16": -26.462438583374023,
+    "FLOAT": -70.82380676269531,
+    "historical_csv": -70.82381,
+    "historical_wav": -26.462438583374023
+  },
+  "asr_mismatches": {
+    "hold-10000-novoice": {
+      "reference": [],
+      "raw_input": []
+    },
+    "control-2000-novoice": {
+      "reference": [],
+      "raw_input": [
+        [
+          "krisp-work",
+          "214"
+        ],
+        [
+          "krisp-call",
+          "001"
+        ],
+        [
+          "chime6",
+          "S01_P04_8807"
+        ]
+      ]
+    },
+    "near-2000-novoice": {
+      "reference": [],
+      "raw_input": [
+        [
+          "krisp-work",
+          "214"
+        ],
+        [
+          "krisp-phone",
+          "169"
+        ],
+        [
+          "chime6",
+          "S01_P04_8807"
+        ]
+      ]
+    },
+    "dfn3": {
+      "reference": [],
+      "raw_input": [
+        [
+          "krisp-work",
+          "213"
+        ],
+        [
+          "krisp-work",
+          "214"
+        ],
+        [
+          "krisp-phone",
+          "169"
+        ],
+        [
+          "chime6",
+          "S01_P04_8807"
+        ]
+      ]
+    },
+    "krisp-hd": {
+      "reference": [],
+      "raw_input": [
+        [
+          "krisp-work",
+          "214"
+        ]
+      ]
+    }
+  },
+  "summary": {
+    "daps": {
+      "hold-10000-novoice": {
+        "clips": 40,
+        "wer": 0.0651677710028329,
+        "corpus_wer": 0.06841741534208708,
+        "words_ref": 2894,
+        "deletions": 0.021157377317065112,
+        "insertions": 0.021085919577842685,
+        "other_db": null,
+        "suppression_clips": 0,
+        "pq": 6.012642240524292,
+        "voice": 0.9724444419145584,
+        "tone": 2.8905899822711945
+      },
+      "control-2000-novoice": {
+        "clips": 40,
+        "wer": 0.0643694078815272,
+        "corpus_wer": 0.06668970283344851,
+        "words_ref": 2894,
+        "deletions": 0.02348043667779571,
+        "insertions": 0.019069112855153607,
+        "other_db": null,
+        "suppression_clips": 0,
+        "pq": 5.986024522781372,
+        "voice": 0.9719683915376663,
+        "tone": 2.903358256816864
+      },
+      "near-2000-novoice": {
+        "clips": 40,
+        "wer": 0.061302928415080095,
+        "corpus_wer": 0.06427090532135453,
+        "words_ref": 2894,
+        "deletions": 0.021157377317065112,
+        "insertions": 0.016234636959532204,
+        "other_db": null,
+        "suppression_clips": 0,
+        "pq": 5.991119146347046,
+        "voice": 0.9725519210100174,
+        "tone": 2.8788435369729997
+      },
+      "dfn3": {
+        "clips": 40,
+        "wer": 0.05591845643490927,
+        "corpus_wer": 0.061506565307532825,
+        "words_ref": 2894,
+        "deletions": 0.024356976232412716,
+        "insertions": 0.015340230702296115,
+        "other_db": null,
+        "suppression_clips": 0,
+        "pq": 6.157314336299896,
+        "voice": 0.9791981667280197,
+        "tone": 3.582522562146187
+      },
+      "input": {
+        "clips": 40,
+        "wer": 0.03094685599760333,
+        "corpus_wer": 0.033517622667588114
+      }
+    },
+    "drvctk": {
+      "hold-10000-novoice": {
+        "clips": 40,
+        "wer": 0.09270833333333334,
+        "corpus_wer": 0.07913669064748201,
+        "words_ref": 278,
+        "deletions": 0.014583333333333332,
+        "insertions": 0.0077777777777777776,
+        "other_db": null,
+        "suppression_clips": 0,
+        "pq": 4.595595234632492,
+        "voice": 0.9160090953111648,
+        "tone": 2.5314914286136627
+      },
+      "control-2000-novoice": {
+        "clips": 40,
+        "wer": 0.11770833333333335,
+        "corpus_wer": 0.10071942446043165,
+        "words_ref": 278,
+        "deletions": 0.016666666666666666,
+        "insertions": 0.020277777777777777,
+        "other_db": null,
+        "suppression_clips": 0,
+        "pq": 4.590795767307282,
+        "voice": 0.9162554368376732,
+        "tone": 2.539260819554329
+      },
+      "near-2000-novoice": {
+        "clips": 40,
+        "wer": 0.09782738095238094,
+        "corpus_wer": 0.08633093525179857,
+        "words_ref": 278,
+        "deletions": 0.014583333333333332,
+        "insertions": 0.014920634920634921,
+        "other_db": null,
+        "suppression_clips": 0,
+        "pq": 4.578346675634384,
+        "voice": 0.913643690943718,
+        "tone": 2.523813155293465
+      },
+      "dfn3": {
+        "clips": 40,
+        "wer": 0.1097718253968254,
+        "corpus_wer": 0.08992805755395683,
+        "words_ref": 278,
+        "deletions": 0.008333333333333333,
+        "insertions": 0.018253968253968255,
+        "other_db": null,
+        "suppression_clips": 0,
+        "pq": 4.8911960542202,
+        "voice": 0.9050328880548477,
+        "tone": 3.1189123511314394
+      },
+      "input": {
+        "clips": 40,
+        "wer": 0.059375,
+        "corpus_wer": 0.050359712230215826
+      }
+    },
+    "chime6": {
+      "hold-10000-novoice": {
+        "clips": 40,
+        "wer": 0.31219436428772707,
+        "corpus_wer": 0.425414364640884,
+        "words_ref": 1448,
+        "deletions": 0.18990524252545443,
+        "insertions": 0.05369121319903306,
+        "other_db": -31.72756518827273,
+        "suppression_clips": 33,
+        "pq": 6.082136309146881,
+        "voice": null,
+        "tone": null
+      },
+      "control-2000-novoice": {
+        "clips": 40,
+        "wer": 0.31997119226603526,
+        "corpus_wer": 0.2900552486187845,
+        "words_ref": 1448,
+        "deletions": 0.20605159515975754,
+        "insertions": 0.03545403371185357,
+        "other_db": -32.34949455636364,
+        "suppression_clips": 33,
+        "pq": 6.047113728523255,
+        "voice": null,
+        "tone": null
+      },
+      "near-2000-novoice": {
+        "clips": 40,
+        "wer": 0.2757435821461634,
+        "corpus_wer": 0.39088397790055246,
+        "words_ref": 1448,
+        "deletions": 0.14417801348044346,
+        "insertions": 0.06742223117757343,
+        "other_db": -30.044672962121208,
+        "suppression_clips": 33,
+        "pq": 6.019272828102112,
+        "voice": null,
+        "tone": null
+      },
+      "dfn3": {
+        "clips": 40,
+        "wer": 0.7239926227295308,
+        "corpus_wer": 0.6678176795580111,
+        "words_ref": 1448,
+        "deletions": 0.6181759978190915,
+        "insertions": 0.048778998778998786,
+        "other_db": -39.927148333333335,
+        "suppression_clips": 33,
+        "pq": 6.163475108146668,
+        "voice": null,
+        "tone": null
+      },
+      "input": {
+        "clips": 40,
+        "wer": 0.5753980035085198,
+        "corpus_wer": 0.6263812154696132
+      }
+    },
+    "easycom-close": {
+      "hold-10000-novoice": {
+        "clips": 40,
+        "wer": 0.19198768036885355,
+        "corpus_wer": 0.18195488721804512,
+        "words_ref": 1330,
+        "deletions": 0.12577073328592003,
+        "insertions": 0.018538352833254647,
+        "other_db": -31.79834492068966,
+        "suppression_clips": 29,
+        "pq": 6.078834342956543,
+        "voice": null,
+        "tone": null
+      },
+      "control-2000-novoice": {
+        "clips": 40,
+        "wer": 0.18782113885171622,
+        "corpus_wer": 0.17969924812030075,
+        "words_ref": 1330,
+        "deletions": 0.12291014448348223,
+        "insertions": 0.01896938731601327,
+        "other_db": -31.970168603448272,
+        "suppression_clips": 29,
+        "pq": 6.069717681407928,
+        "voice": null,
+        "tone": null
+      },
+      "near-2000-novoice": {
+        "clips": 40,
+        "wer": 0.19692282769130326,
+        "corpus_wer": 0.18195488721804512,
+        "words_ref": 1330,
+        "deletions": 0.11453343031384342,
+        "insertions": 0.03495040093008535,
+        "other_db": -30.879017955172415,
+        "suppression_clips": 29,
+        "pq": 6.052072238922119,
+        "voice": null,
+        "tone": null
+      },
+      "dfn3": {
+        "clips": 40,
+        "wer": 0.932036565011497,
+        "corpus_wer": 0.9330827067669173,
+        "words_ref": 1330,
+        "deletions": 0.8836028243505869,
+        "insertions": 0.0,
+        "other_db": -109.8728840344828,
+        "suppression_clips": 29,
+        "pq": 6.769347274303437,
+        "voice": null,
+        "tone": null
+      },
+      "input": {
+        "clips": 40,
+        "wer": 0.3813560092374124,
+        "corpus_wer": 0.37293233082706767
+      }
+    },
+    "easycom-ear": {
+      "hold-10000-novoice": {
+        "clips": 40,
+        "wer": 0.2714941635149078,
+        "corpus_wer": 0.47075606276747506,
+        "words_ref": 1402,
+        "deletions": 0.0896625207647515,
+        "insertions": 0.10125385551144546,
+        "other_db": -26.32015297142857,
+        "suppression_clips": 28,
+        "pq": 5.398480796813965,
+        "voice": null,
+        "tone": null
+      },
+      "control-2000-novoice": {
+        "clips": 40,
+        "wer": 0.2658931002658195,
+        "corpus_wer": 0.3773181169757489,
+        "words_ref": 1402,
+        "deletions": 0.10120179701476059,
+        "insertions": 0.08474435968142265,
+        "other_db": -28.349231092857146,
+        "suppression_clips": 28,
+        "pq": 5.430361986160278,
+        "voice": null,
+        "tone": null
+      },
+      "near-2000-novoice": {
+        "clips": 40,
+        "wer": 0.275122859790269,
+        "corpus_wer": 0.48359486447931527,
+        "words_ref": 1402,
+        "deletions": 0.09044373930738644,
+        "insertions": 0.11745673873765525,
+        "other_db": -25.16366743928571,
+        "suppression_clips": 28,
+        "pq": 5.35449366569519,
+        "voice": null,
+        "tone": null
+      },
+      "dfn3": {
+        "clips": 40,
+        "wer": 0.3568014758776131,
+        "corpus_wer": 0.3252496433666191,
+        "words_ref": 1402,
+        "deletions": 0.12422902095940583,
+        "insertions": 0.1630318650481292,
+        "other_db": -15.171142728571429,
+        "suppression_clips": 28,
+        "pq": 5.146760821342468,
+        "voice": null,
+        "tone": null
+      },
+      "input": {
+        "clips": 40,
+        "wer": 0.39632862220155635,
+        "corpus_wer": 0.3773181169757489
+      }
+    },
+    "krisp-work": {
+      "hold-10000-novoice": {
+        "clips": 40,
+        "wer": 0.09678822516635877,
+        "corpus_wer": 0.09427689384944193,
+        "words_ref": 4211,
+        "deletions": 0.030293232315969754,
+        "insertions": 0.01438735061940492,
+        "other_db": -36.689251675,
+        "suppression_clips": 40,
+        "pq": 5.6561574816703795,
+        "voice": null,
+        "tone": null
+      },
+      "control-2000-novoice": {
+        "clips": 40,
+        "wer": 0.09386310588928468,
+        "corpus_wer": 0.09071479458560912,
+        "words_ref": 4211,
+        "deletions": 0.02667778880979199,
+        "insertions": 0.014304688676856091,
+        "other_db": -37.532949002500004,
+        "suppression_clips": 40,
+        "pq": 5.664393532276153,
+        "voice": null,
+        "tone": null
+      },
+      "near-2000-novoice": {
+        "clips": 40,
+        "wer": 0.10796083262076821,
+        "corpus_wer": 0.10258845879838518,
+        "words_ref": 4211,
+        "deletions": 0.039988736340692124,
+        "insertions": 0.014271797522936152,
+        "other_db": -36.050834486,
+        "suppression_clips": 40,
+        "pq": 5.655480861663818,
+        "voice": null,
+        "tone": null
+      },
+      "dfn3": {
+        "clips": 40,
+        "wer": 0.20553849038475,
+        "corpus_wer": 0.21966278793635716,
+        "words_ref": 4211,
+        "deletions": 0.04218566244285683,
+        "insertions": 0.10025591857802926,
+        "other_db": -14.84062841425,
+        "suppression_clips": 40,
+        "pq": 5.156834697723388,
+        "voice": null,
+        "tone": null
+      },
+      "krisp-hd": {
+        "clips": 40,
+        "wer": 0.1031417518638194,
+        "corpus_wer": 0.10211351222987414,
+        "words_ref": 4211,
+        "deletions": 0.029504488573179673,
+        "insertions": 0.014913841281803248,
+        "other_db": -31.0388535625,
+        "suppression_clips": 40,
+        "pq": 5.531781506538391,
+        "voice": null,
+        "tone": null
+      },
+      "input": {
+        "clips": 40,
+        "wer": 0.2606634734761287,
+        "corpus_wer": 0.3061030634053669
+      }
+    },
+    "krisp-call": {
+      "hold-10000-novoice": {
+        "clips": 40,
+        "wer": 0.1313367645654876,
+        "corpus_wer": 0.13242756588639712,
+        "words_ref": 6109,
+        "deletions": 0.08115652304317297,
+        "insertions": 0.010773930828774394,
+        "other_db": -35.458791892307694,
+        "suppression_clips": 39,
+        "pq": 6.458528757095337,
+        "voice": null,
+        "tone": null
+      },
+      "control-2000-novoice": {
+        "clips": 40,
+        "wer": 0.15136496546221156,
+        "corpus_wer": 0.17793419544933706,
+        "words_ref": 6109,
+        "deletions": 0.08055450504848333,
+        "insertions": 0.035385329792504965,
+        "other_db": -35.81493006153846,
+        "suppression_clips": 39,
+        "pq": 6.470225918292999,
+        "voice": null,
+        "tone": null
+      },
+      "near-2000-novoice": {
+        "clips": 40,
+        "wer": 0.13078379777831733,
+        "corpus_wer": 0.13160910132591258,
+        "words_ref": 6109,
+        "deletions": 0.08046140458329486,
+        "insertions": 0.010773930828774394,
+        "other_db": -34.005452841025644,
+        "suppression_clips": 39,
+        "pq": 6.450514090061188,
+        "voice": null,
+        "tone": null
+      },
+      "dfn3": {
+        "clips": 40,
+        "wer": 0.19774825804963614,
+        "corpus_wer": 0.21525617940743166,
+        "words_ref": 6109,
+        "deletions": 0.10798723887344579,
+        "insertions": 0.04162830460640392,
+        "other_db": -18.622329873333328,
+        "suppression_clips": 39,
+        "pq": 5.965413427352905,
+        "voice": null,
+        "tone": null
+      },
+      "krisp-hd": {
+        "clips": 40,
+        "wer": 0.1475307992435686,
+        "corpus_wer": 0.15207071533802585,
+        "words_ref": 6109,
+        "deletions": 0.07966905472370875,
+        "insertions": 0.02294769696406513,
+        "other_db": -29.965919602564092,
+        "suppression_clips": 39,
+        "pq": 6.230172049999237,
+        "voice": null,
+        "tone": null
+      },
+      "input": {
+        "clips": 40,
+        "wer": 0.20338039315527504,
+        "corpus_wer": 0.22278605336388935
+      }
+    },
+    "krisp-phone": {
+      "hold-10000-novoice": {
+        "clips": 40,
+        "wer": 0.041097073050537614,
+        "corpus_wer": 0.04142727547626247,
+        "words_ref": 3307,
+        "deletions": 0.009925819123946258,
+        "insertions": 0.005148330310962512,
+        "other_db": -5.9501662049999995,
+        "suppression_clips": 4,
+        "pq": 4.230364006757736,
+        "voice": null,
+        "tone": null
+      },
+      "control-2000-novoice": {
+        "clips": 40,
+        "wer": 0.03955928910996836,
+        "corpus_wer": 0.03991533111581494,
+        "words_ref": 3307,
+        "deletions": 0.00821864319802033,
+        "insertions": 0.0054060622697254,
+        "other_db": -6.435333259999999,
+        "suppression_clips": 4,
+        "pq": 4.231475925445556,
+        "voice": null,
+        "tone": null
+      },
+      "near-2000-novoice": {
+        "clips": 40,
+        "wer": 0.039505637865352425,
+        "corpus_wer": 0.03991533111581494,
+        "words_ref": 3307,
+        "deletions": 0.00821864319802033,
+        "insertions": 0.00483968833565387,
+        "other_db": -6.7842267825,
+        "suppression_clips": 4,
+        "pq": 4.23591040968895,
+        "voice": null,
+        "tone": null
+      },
+      "dfn3": {
+        "clips": 40,
+        "wer": 0.06275339729567622,
+        "corpus_wer": 0.06289688539461748,
+        "words_ref": 3307,
+        "deletions": 0.013163363296473996,
+        "insertions": 0.007102542287565884,
+        "other_db": -37.3909058375,
+        "suppression_clips": 4,
+        "pq": 4.1970033824443815,
+        "voice": null,
+        "tone": null
+      },
+      "krisp-hd": {
+        "clips": 40,
+        "wer": 0.0434002177903524,
+        "corpus_wer": 0.04384638645297853,
+        "words_ref": 3307,
+        "deletions": 0.008826003193558038,
+        "insertions": 0.004832251179622337,
+        "other_db": -17.933162175,
+        "suppression_clips": 4,
+        "pq": 4.218551659584046,
+        "voice": null,
+        "tone": null
+      },
+      "input": {
+        "clips": 40,
+        "wer": 0.03796630323333427,
+        "corpus_wer": 0.03810099788327789
+      }
+    }
+  },
+  "uncertainty": {
+    "method": "Paired speaker-cluster percentile bootstrap of capped clip WER; seed reset per contrast; negative favors first system",
+    "generator": "numpy.default_rng(20261031)",
+    "replicates": 5000,
+    "results": {
+      "krisp-work": {
+        "hold-10000-novoice minus krisp-hd": {
+          "speakers": 24,
+          "delta_pp": -0.6353526697460632,
+          "ci95_pp": [
+            -2.387024565114395,
+            1.1904549092983052
+          ]
+        },
+        "hold-10000-novoice minus dfn3": {
+          "speakers": 24,
+          "delta_pp": -10.875026521839121,
+          "ci95_pp": [
+            -20.24530429562387,
+            -2.7198647225205637
+          ]
+        },
+        "control-2000-novoice minus hold-10000-novoice": {
+          "speakers": 24,
+          "delta_pp": -0.2925119277074087,
+          "ci95_pp": [
+            -0.8702361748050009,
+            0.09462534606806289
+          ]
+        },
+        "near-2000-novoice minus hold-10000-novoice": {
+          "speakers": 24,
+          "delta_pp": 1.1172607454409436,
+          "ci95_pp": [
+            -0.6099293038830913,
+            3.227506911729357
+          ]
+        }
+      },
+      "krisp-call": {
+        "hold-10000-novoice minus krisp-hd": {
+          "speakers": 7,
+          "delta_pp": -1.6194034678081004,
+          "ci95_pp": [
+            -4.07194343741956,
+            -0.06980197387760888
+          ]
+        },
+        "hold-10000-novoice minus dfn3": {
+          "speakers": 7,
+          "delta_pp": -6.641149348414852,
+          "ci95_pp": [
+            -13.385304482937855,
+            -2.3464040725179554
+          ]
+        },
+        "control-2000-novoice minus hold-10000-novoice": {
+          "speakers": 7,
+          "delta_pp": 2.0028200896723978,
+          "ci95_pp": [
+            -0.2018719832117377,
+            6.83178565241407
+          ]
+        },
+        "near-2000-novoice minus hold-10000-novoice": {
+          "speakers": 7,
+          "delta_pp": -0.0552966787170275,
+          "ci95_pp": [
+            -0.2654508704169898,
+            0.087388149510669
+          ]
+        }
+      },
+      "krisp-phone": {
+        "hold-10000-novoice minus krisp-hd": {
+          "speakers": 23,
+          "delta_pp": -0.230314473981479,
+          "ci95_pp": [
+            -0.8661245872614749,
+            0.27619368080119916
+          ]
+        },
+        "hold-10000-novoice minus dfn3": {
+          "speakers": 23,
+          "delta_pp": -2.1656324245138614,
+          "ci95_pp": [
+            -4.1299549736889185,
+            -0.735458116394191
+          ]
+        },
+        "control-2000-novoice minus hold-10000-novoice": {
+          "speakers": 23,
+          "delta_pp": -0.15377839405692545,
+          "ci95_pp": [
+            -0.5579510058077612,
+            0.0545376128664245
+          ]
+        },
+        "near-2000-novoice minus hold-10000-novoice": {
+          "speakers": 23,
+          "delta_pp": -0.15914351851851855,
+          "ci95_pp": [
+            -0.5478609396433471,
+            0.05341880341880337
+          ]
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Forty development clips per set; these sets informed model development. No fresh independent test set.",
+    "Krisp subsets have 24, 7 and 23 speakers; suppression uses 40, 39 and 4 clips respectively. Phone suppression is particularly uncertain.",
+    "DAPS and DR-VCTK references are ASR transcripts of clean recordings, not human transcripts.",
+    "No reference transcripts differed between fresh runs. Repeated raw-input ASR differed on some clips; the reported raw-input row uses the Hold pass consistently.",
+    "Clip WER is capped at 1; uncapped corpus WER and error counts are also provided. These aggregates can rank models differently.",
+    "No current Apple Voice Isolation/Krisp Mac app comparison, blind listening, battery, live routing or end-to-end latency test."
+  ]
+}

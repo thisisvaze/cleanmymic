@@ -1,0 +1,35 @@
+import Testing
+@testable import CleanMyMic
+
+@Test func onlyThePairedVirtualOutputCanReceiveCleanAudio() {
+    let mic = AudioDevice(id: 1, uid: micUID, name: "CleanMyMic", inputs: true, outputs: false)
+    let cable = AudioDevice(id: 2, uid: cableUID, name: "Hidden cable", inputs: false, outputs: true)
+    let headphones = AudioDevice(id: 3, uid: "headphones", name: "Headphones", inputs: false, outputs: true)
+    let impostor = AudioDevice(id: 4, uid: "other", name: "CleanMyMic", inputs: true, outputs: true)
+    #expect(cleanMicOutput(in: [headphones, impostor, mic, cable]) == cable)
+    #expect(cleanMicOutput(in: [headphones, impostor, mic]) == nil)
+    #expect(cleanMicOutput(in: [headphones, impostor, cable]) == nil)
+    #expect(cleanMicOutput(in: [mic, AudioDevice(id: 2, uid: cableUID, name: "Wrong direction",
+                                               inputs: true, outputs: false)]) == nil)
+}
+
+@Test func microphoneChoicesExcludeLoopbackAndOutputDevices() {
+    let devices = [
+        AudioDevice(id: 1, uid: "physical", name: "Mac microphone", inputs: true, outputs: false),
+        AudioDevice(id: 2, uid: micUID, name: "CleanMyMic", inputs: true, outputs: false),
+        AudioDevice(id: 3, uid: cableUID, name: "Cable", inputs: true, outputs: true),
+        AudioDevice(id: 4, uid: "blackhole", name: "BlackHole 2ch", inputs: true, outputs: true),
+        AudioDevice(id: 5, uid: "speakers", name: "Speakers", inputs: false, outputs: true),
+    ]
+    #expect(devices.filter(\.isMicrophoneSource).map(\.uid) == ["physical"])
+}
+
+@Test func automaticMicrophoneRemembersThePhysicalInputAndHonorsOverrides() {
+    let builtIn = AudioDevice(id: 1, uid: "builtin", name: "Mac microphone", inputs: true, outputs: false)
+    let headset = AudioDevice(id: 2, uid: "headset", name: "AirPods", inputs: true, outputs: true)
+    let virtual = AudioDevice(id: 3, uid: micUID, name: "CleanMyMic", inputs: true, outputs: false)
+    #expect(microphoneSource(["", "headset", micUID], in: [virtual, builtIn, headset]) == headset.id)
+    #expect(microphoneSource(["builtin", "headset", micUID], in: [virtual, builtIn, headset]) == builtIn.id)
+    #expect(microphoneSource(["headset", "builtin", micUID], in: [virtual, builtIn]) == builtIn.id)
+    #expect(microphoneSource([micUID], in: [virtual]) == nil)
+}

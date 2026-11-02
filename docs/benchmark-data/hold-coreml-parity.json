@@ -1,0 +1,80 @@
+{
+  "hardware": "Apple M5 Pro",
+  "engine": "Installed Hold-10k Core ML; current shared Enhancer.swift file mode; full strength; no enrollment",
+  "checkpoint_sha256": "20e1b4792ec7698473f38815f2d7a22b02ae0a2a98f882048373514e4c3a6c03",
+  "coreml_weight_sha256": "a8896e66f673dd54b7251577806d51685d2def46c918310c73a95ca6319373bc",
+  "swift_realtime_factors": [
+    0.068,
+    0.075
+  ],
+  "results": [
+    {
+      "recording": "free-desk_macbook-pro-pytorch.wav",
+      "output_lengths": [
+        3343680,
+        3343200
+      ],
+      "common_seconds": 69.65,
+      "segments": [
+        {
+          "segment": "all",
+          "rms_relative": 2.328735679045593e-06,
+          "numerical_snr_db": 112.65759605709897,
+          "peak_relative": 3.964963378194806e-06,
+          "max_abs_error": 6.998889148235321e-07
+        },
+        {
+          "segment": "quiet",
+          "rms_relative": 0.00021782632992899622,
+          "numerical_snr_db": 73.23779251440192,
+          "peak_relative": 0.0001942797488478054,
+          "max_abs_error": 9.598579708836041e-10
+        },
+        {
+          "segment": "silence_tail",
+          "rms_relative": 0.0,
+          "numerical_snr_db": null,
+          "peak_relative": 0.0,
+          "max_abs_error": 0.0
+        }
+      ]
+    },
+    {
+      "recording": "free-desk_studio-display-xdr-pytorch.wav",
+      "output_lengths": [
+        3321600,
+        3321600
+      ],
+      "common_seconds": 69.2,
+      "segments": [
+        {
+          "segment": "all",
+          "rms_relative": 1.5459446271403069e-06,
+          "numerical_snr_db": 116.21612131518553,
+          "peak_relative": 2.7197194210289554e-06,
+          "max_abs_error": 5.736947059631348e-07
+        },
+        {
+          "segment": "quiet",
+          "rms_relative": 0.0002705772629015218,
+          "numerical_snr_db": 71.3541740151731,
+          "peak_relative": 0.0003446029295999495,
+          "max_abs_error": 4.667754183174111e-09
+        },
+        {
+          "segment": "silence_tail",
+          "rms_relative": 0.0,
+          "numerical_snr_db": null,
+          "peak_relative": 0.0,
+          "max_abs_error": 0.0
+        }
+      ]
+    }
+  ],
+  "limits": "Two existing recordings plus 10 seconds attenuated 40 dB and 5 seconds silence each. Compared common output prefix: Swift file mode produced one fewer 10 ms frame on the first test. Excludes audio devices, routing and initialization; not a live-call latency or quality test. AVAudioFile single-read buffer lengths were shorter than advertised file lengths; the omitted tail was appended silence.",
+  "source_sha256": {
+    "train/dfn3.py": "602217b01ff21e271a5c2a68f34a2e2d446fb634a92843ac806282c02df1891c",
+    "mac/Sources/CleanMyMic/Enhancer.swift": "fa4cc9b396043a2915c702cca3ad06223efc9304c18b069b474054fbeaf823e0",
+    "mac/live/main.swift": "4d3b8c4b1dfec96932a2f011861057a46aab140b22f72fafeccb446f1291f874"
+  }
+}

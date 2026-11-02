@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CleanMyMic · Real-call comparisons</title>
+<style>
+  :root { color-scheme: light dark; font: 17px/1.5 system-ui, sans-serif; }
+  body { max-width: 1100px; margin: 0 auto; padding: 40px 20px; }
+  h1 { font-size: 2rem; margin-bottom: 8px; }
+  h2 { font-size: 1.15rem; margin: 0; }
+  section { border-top: 1px solid #8886; padding: 24px 0; }
+  section > p { margin: 4px 0 16px; font-size: .9rem; }
+  .tracks { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 20px; }
+  figure { margin: 0; }
+  figcaption { margin-bottom: 8px; }
+  audio { width: 100%; }
+  select { font: inherit; padding: 4px 8px; margin-left: 8px; }
+  a { color: inherit; text-underline-offset: 3px; }
+  footer { font-size: .85rem; }
+  @media (max-width: 760px) { .tracks { grid-template-columns: 1fr; gap: 16px; } }
+</style>
+<main>
+  <h1>Real-call comparisons</h1>
+  <p>Three 10-second excerpts with stronger background noise, from scripted calls recorded in real environments. No added noise; every version of a clip uses the same playback gain.</p>
+  <p>Keep your volume the same and compare speech naturalness as well as background noise. No overall winner is established.</p>
+  <p><label for="comparison">Compare with</label><select id="comparison"><option value="krisp">Krisp VI 2.5 HD</option><option value="dfn3">DeepFilterNet3</option></select></p>
+  <section aria-labelledby="work">
+    <h2 id="work">Office · overlapping voices</h2>
+    <p>Apple EarPods · recording 176 · 00:59–01:09</p>
+    <div class="tracks">
+      <figure><figcaption>Original</figcaption><audio controls preload="metadata" aria-label="Office · overlapping voices: original" src="work-raw.wav"></audio></figure>
+      <figure><figcaption>CleanMyMic Base · 100%</figcaption><audio controls preload="metadata" aria-label="Office · overlapping voices: CleanMyMic Base" src="work-base.wav"></audio></figure>
+      <figure><figcaption class="comparison-name">Krisp VI 2.5 HD</figcaption><audio class="comparison" data-case="work" controls preload="metadata" aria-label="Office · overlapping voices: Krisp VI 2.5 HD" src="work-krisp.wav"></audio></figure>
+    </div>
+  </section>
+  <section aria-labelledby="call_center">
+    <h2 id="call_center">Call center · background conversations</h2>
+    <p>Jabra Evolve 10 · recording 030 · 01:25–01:35</p>
+    <div class="tracks">
+      <figure><figcaption>Original</figcaption><audio controls preload="metadata" aria-label="Call center · background conversations: original" src="call_center-raw.wav"></audio></figure>
+      <figure><figcaption>CleanMyMic Base · 100%</figcaption><audio controls preload="metadata" aria-label="Call center · background conversations: CleanMyMic Base" src="call_center-base.wav"></audio></figure>
+      <figure><figcaption class="comparison-name">Krisp VI 2.5 HD</figcaption><audio class="comparison" data-case="call_center" controls preload="metadata" aria-label="Call center · background conversations: Krisp VI 2.5 HD" src="call_center-krisp.wav"></audio></figure>
+    </div>
+  </section>
+  <section aria-labelledby="phone_calls">
+    <h2 id="phone_calls">Car · cabin noise</h2>
+    <p>Car Bluetooth / iPhone 14 Pro · recording 166 · 00:01–00:11</p>
+    <div class="tracks">
+      <figure><figcaption>Original</figcaption><audio controls preload="metadata" aria-label="Car · cabin noise: original" src="phone_calls-raw.wav"></audio></figure>
+      <figure><figcaption>CleanMyMic Base · 100%</figcaption><audio controls preload="metadata" aria-label="Car · cabin noise: CleanMyMic Base" src="phone_calls-base.wav"></audio></figure>
+      <figure><figcaption class="comparison-name">Krisp VI 2.5 HD</figcaption><audio class="comparison" data-case="phone_calls" controls preload="metadata" aria-label="Car · cabin noise: Krisp VI 2.5 HD" src="phone_calls-krisp.wav"></audio></figure>
+    </div>
+  </section>
+  <footer>Krisp is its published benchmark output; DeepFilterNet3 runs through our Core ML port. This is not a comparison of the current desktop apps. Audio © Krisp Technologies · <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a> · <a href="README.md">Sources and method</a>.</footer>
+</main>
+<script>
+  const comparison = document.getElementById('comparison');
+  const players = [...document.querySelectorAll('audio')];
+  comparison.addEventListener('change', () => {
+    document.querySelectorAll('audio.comparison').forEach(audio => {
+      audio.pause();
+      audio.src = `${audio.dataset.case}-${comparison.value}.wav`;
+      audio.setAttribute('aria-label', `${audio.closest('section').querySelector('h2').textContent}: ${comparison.selectedOptions[0].textContent}`);
+    });
+    document.querySelectorAll('.comparison-name').forEach(label => label.textContent = comparison.selectedOptions[0].textContent);
+  });
+  players.forEach(audio => audio.addEventListener('play', () => players.forEach(other => { if (other !== audio) other.pause(); })));
+</script>
+</html>

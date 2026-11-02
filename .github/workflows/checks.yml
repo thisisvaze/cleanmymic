@@ -1,0 +1,45 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Source checks
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Check Python syntax
+        run: uv run --locked python -m compileall -q train eval
+      - name: Check streaming model
+        run: uv run --locked train/model.py
+      - name: Build Mac app
+        run: swift build -c release --package-path mac
+      - name: Check microphone routing
+        run: swift test --package-path mac
+      - name: Check installer configuration
+        run: python3 mac/installer/verify.py
+      - name: Build audio test tool
+        run: swiftc -O mac/live/main.swift mac/Sources/CleanMyMic/Enhancer.swift -o "$RUNNER_TEMP/cleanmymic-live"
+      - name: Build processing benchmark
+        run: swiftc -O eval/latency.swift mac/Sources/CleanMyMic/Enhancer.swift -o "$RUNNER_TEMP/cleanmymic-latency"

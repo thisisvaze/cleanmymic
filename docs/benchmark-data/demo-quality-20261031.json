@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-31",
+  "scope": "Prior prepared mixes; one LibriSpeech narration mixed with fan, keyboard, and rain at 5 dB SNR. Not the new real-call clips.",
+  "input_commit": "5564d4fb303657f1b0a04264f7b9786ae4d841e4",
+  "source_and_mix_method": "https://github.com/thisisvaze/cleanmymic/blob/5564d4fb303657f1b0a04264f7b9786ae4d841e4/docs/audio/README.md",
+  "clean_reference_sha256": "5a607c7b3f077ef819aa71000d72c21681f8a49a9c52232c79edf3d4df07df64",
+  "metric": "Extended STOI, higher is better; pystoi(clean, output, 48000, extended=True). Same 10-second window including its padded pauses.",
+  "pystoi_version": "0.4.1",
+  "base_checkpoint_sha256": "20e1b4792ec7698473f38815f2d7a22b02ae0a2a98f882048373514e4c3a6c03",
+  "deepfilternet3_checkpoint_sha256": "23b92884f63ccf54bb026014604625ab231657b6480df65db4095c4c171e6003",
+  "results": [
+    {
+      "case": "fan",
+      "input_sha256": "982981247fb2819399cc5a713fac782586f0bb4108a7ae86d42aa1cc964ff13a",
+      "estoi": {
+        "input": 0.6966862127491374,
+        "base_100_percent": 0.8088186528123658,
+        "base_70_percent": 0.7771610664708302,
+        "deepfilternet3": 0.8303369683835283
+      }
+    },
+    {
+      "case": "keyboard",
+      "input_sha256": "f191e5f15f4f4066e0d3cfe18ae0a7e29398ada0527d83baf7a9c3b2aedd930b",
+      "estoi": {
+        "input": 0.7808232982674271,
+        "base_100_percent": 0.8236150443828547,
+        "base_70_percent": 0.8305293274223081,
+        "deepfilternet3": 0.8654668733359713
+      }
+    },
+    {
+      "case": "rain",
+      "input_sha256": "0e1cf9b0ebcdbc19604cc43d22ac05ee840cddedc4be0c1efee8577d366bea21",
+      "estoi": {
+        "input": 0.4734038332772391,
+        "base_100_percent": 0.5667427841934433,
+        "base_70_percent": 0.5380092379260366,
+        "deepfilternet3": 0.6211909288412457
+      }
+    }
+  ],
+  "export_check": "Base Core ML PCM16 outputs matched the PyTorch checkpoint within 3.08e-5 maximum absolute sample error on the first 9.9 seconds of each clip, consistent with PCM16 quantization.",
+  "conclusion": "DeepFilterNet3 has higher eSTOI than Base in all three prepared mixes. Reducing Base to 70% does not consistently improve eSTOI. The current Base checkpoint is not established as the best listening-quality option.",
+  "limits": [
+    "Three constructed examples from one speaker are not a general benchmark.",
+    "eSTOI measures predicted intelligibility, not naturalness or listening preference.",
+    "A clean speech reference is unavailable for the new real-world recordings; no intrusive score is assigned to those excerpts.",
+    "Human listening review and independent broader evaluation remain necessary."
+  ]
+}
