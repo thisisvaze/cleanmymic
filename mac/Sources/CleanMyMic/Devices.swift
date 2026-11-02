@@ -7,9 +7,11 @@ nonisolated struct AudioDevice: Identifiable, Hashable, Sendable {
     let uid: String  // stable across reboots, unlike id: what settings store
     let name: String
     let inputs: Bool, outputs: Bool
+    var isVirtual = false  // software audio (Zoom's and Teams' devices, loopback cables), not a microphone
 
     var isMicrophoneSource: Bool {
-        inputs && uid != micUID && uid != cableUID && !name.localizedCaseInsensitiveContains("BlackHole")
+        inputs && !isVirtual && uid != micUID && uid != cableUID && !name.localizedCaseInsensitiveContains("BlackHole")
+            && !uid.hasPrefix("CADefaultDeviceAggregate")  // Core Audio's private helper for our own audio engine
     }
 }
 
@@ -48,7 +50,8 @@ nonisolated func audioDevices() -> [AudioDevice] {
         AudioDevice(id: $0, uid: string($0, kAudioDevicePropertyDeviceUID),
                     name: $0 == cable ? "CleanMyMic (for calls)" : string($0, kAudioObjectPropertyName),
                     inputs: channels($0, kAudioObjectPropertyScopeInput) > 0,
-                    outputs: channels($0, kAudioObjectPropertyScopeOutput) > 0)
+                    outputs: channels($0, kAudioObjectPropertyScopeOutput) > 0,
+                    isVirtual: transport($0) == kAudioDeviceTransportTypeVirtual)
     }
 }
 
@@ -64,12 +67,13 @@ private nonisolated func hiddenDevice(uid: String) -> AudioDeviceID? {
     return ok && id != 0 ? id : nil
 }
 
-nonisolated func isBuiltIn(_ id: AudioDeviceID) -> Bool {
+nonisolated func isBuiltIn(_ id: AudioDeviceID) -> Bool { transport(id) == kAudioDeviceTransportTypeBuiltIn }
+
+private nonisolated func transport(_ id: AudioDeviceID) -> UInt32? {
     var addr = address(kAudioDevicePropertyTransportType)
     var transport = UInt32(0)
     var size = UInt32(MemoryLayout<UInt32>.size)
-    let ok = AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &transport) == noErr
-    return ok && transport == kAudioDeviceTransportTypeBuiltIn
+    return AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &transport) == noErr ? transport : nil
 }
 
 /// The Mac's own speakers: a headphone test through them feeds the voice back into the mic.

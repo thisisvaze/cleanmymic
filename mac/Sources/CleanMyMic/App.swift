@@ -52,7 +52,16 @@ final class Controller {
             pipeline?.setMix(mix)
         }
     }
-    var inputUID: String { didSet { defaults.set(inputUID, forKey: "input"); restart() } }  // "": automatic
+    var inputUID: String {  // "": automatic
+        didSet {
+            defaults.set(inputUID, forKey: "input")
+            defaults.set(devices.first { $0.uid == inputUID }?.name, forKey: "inputName")  // to name it while it's away
+            restart()
+        }
+    }
+    /// The chosen mic is disconnected (AirPods in their case): another one stands in until it's back.
+    var preferredMissing: Bool { !inputUID.isEmpty && !microphones.contains { $0.uid == inputUID } }
+    var preferredName: String { defaults.string(forKey: "inputName") ?? "Your chosen microphone" }
     var strength: Double { didSet { defaults.set(strength, forKey: "strength"); pipeline?.setMix(mix) } }
     var model: String { didSet { if model != oldValue { defaults.set(model, forKey: "model"); restart() } } }
     let models = bundledModels()
