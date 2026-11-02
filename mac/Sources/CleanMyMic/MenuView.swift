@@ -2,7 +2,8 @@ import SwiftUI
 
 struct MenuView: View {
     @Bindable var controller: Controller
-    @State private var showsSettings = false
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     private var stateLabel: String {
         if controller.isRunning { return controller.status }
@@ -94,56 +95,46 @@ struct MenuView: View {
                     .padding(.bottom, 12)
             }
 
-            Divider()
-            HStack {
-                Label("On-device", systemImage: "lock")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Settings", systemImage: "gearshape") { showsSettings.toggle() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .padding(6)
-                    .help("Settings")
-                    .popover(isPresented: $showsSettings) { settings }
-                Button("Quit") { controller.quit() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+            Divider().padding(.horizontal, 16)
+            VStack(spacing: 0) {  // system-style rows, like the Wi-Fi and Bluetooth menus
+                MenuRow("Settings…") {
+                    dismiss()
+                    openWindow(id: "settings")
+                    NSApp.activate()  // a menu bar app's window opens behind others otherwise
+                }
+                .keyboardShortcut(",")
+                MenuRow("Quit CleanMyMic") { controller.quit() }
                     .keyboardShortcut("q")
-                    .accessibilityLabel("Quit CleanMyMic")
-                    .padding(.vertical, 6)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(6)
         }
         .frame(width: 320)
         .onAppear { controller.refresh() }
         .onDisappear { controller.testing = false }  // never left playing into headphones unseen
     }
 
-    private var settings: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Settings").font(.headline)
-            HStack {
-                Text("Cleanup strength").font(.system(size: 12))
-                Spacer()
-                Text(controller.strength, format: .percent.precision(.fractionLength(0)))
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-            Slider(value: $controller.strength, in: 0...1)
-                .controlSize(.small)
-                .accessibilityLabel("Cleanup strength")
-                .accessibilityValue(Text(controller.strength, format: .percent.precision(.fractionLength(0))))
-            Text("Used when CleanMyMic is switched on.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+}
+
+/// A full-width menu item that highlights on hover.
+private struct MenuRow: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    init(_ title: String, action: @escaping () -> Void) { (self.title, self.action) = (title, action) }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(hovered ? Color.primary.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
         }
-        .padding(16)
-        .frame(width: 280)
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
     }
 }
 

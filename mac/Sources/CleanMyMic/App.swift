@@ -21,11 +21,26 @@ struct CleanMyMicApp: App {
                 .accessibilityLabel("CleanMyMic")
         }
         .menuBarExtraStyle(.window)
+
+        Window("CleanMyMic Settings", id: "settings") {
+            SettingsView(controller: controller)
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)  // opened from the menu, never at launch
     }
 }
 
-private let modelName = "CleanMyMic Base"
-private let modelResource = "Hold-10k"
+private nonisolated let defaultModel = "Hold-10k"
+
+/// The models the app bundles, by resource name. Only Base ships today; others appear here when bundled.
+nonisolated func bundledModels(_ bundle: Bundle = .main) -> [String] {
+    (bundle.urls(forResourcesWithExtension: "mlmodelc", subdirectory: nil) ?? [])
+        .map { $0.deletingPathExtension().lastPathComponent }.sorted()
+}
+
+nonisolated func modelDisplayName(_ resource: String) -> String {
+    resource == defaultModel ? "CleanMyMic Base" : resource
+}
 
 @Observable
 final class Controller {
@@ -33,6 +48,8 @@ final class Controller {
     var noiseRemoval: Bool { didSet { defaults.set(noiseRemoval, forKey: "enabled"); pipeline?.setMix(mix) } }
     var inputUID: String { didSet { defaults.set(inputUID, forKey: "input"); restart() } }  // "": automatic
     var strength: Double { didSet { defaults.set(strength, forKey: "strength"); pipeline?.setMix(mix) } }
+    var model: String { didSet { if model != oldValue { defaults.set(model, forKey: "model"); restart() } } }
+    let models = bundledModels()
     /// Hear yourself through headphones, to compare original and cleaned. A call app opening the mic ends it.
     var testing = false { didSet { if testing != oldValue { testCleaned = true; restart() } } }
     /// The test's own comparison: never changes `noiseRemoval`, which is what calls get.
@@ -54,6 +71,8 @@ final class Controller {
         noiseRemoval = defaults.object(forKey: "enabled") as? Bool ?? true
         inputUID = defaults.string(forKey: "input") ?? ""
         strength = defaults.object(forKey: "strength") as? Double ?? 1
+        let saved = defaults.string(forKey: "model") ?? defaultModel
+        model = models.contains(saved) ? saved : defaultModel  // a model dropped from the app falls back to Base
         try? SMAppService.mainApp.register()  // start at login
         watch(kAudioHardwarePropertyDefaultInputDevice) { [weak self] in Task { @MainActor in self?.systemMicChanged() } }
         watch(kAudioHardwarePropertyDevices) { [weak self] in Task { @MainActor in self?.devicesChanged() } }
@@ -178,8 +197,8 @@ final class Controller {
                 return
             }
             guard let input = source() else { failed("No microphone found.", gen); return }
-            guard let model = Bundle.main.url(forResource: modelResource, withExtension: "mlmodelc") else {
-                failed(AudioError.noModel(modelName).description, gen)
+            guard let model = Bundle.main.url(forResource: model, withExtension: "mlmodelc") else {
+                failed(AudioError.noModel(modelDisplayName(self.model)).description, gen)
                 return
             }
             try observeMic(mic.id)
@@ -254,7 +273,8 @@ func check(mic: String, output: String) -> Never {
         print("devices:", devices.map { "\($0.name) (\($0.inputs ? "in" : "")\($0.outputs ? " out" : ""))" })
         exit(1)
     }
-    guard let model = Bundle.main.url(forResource: modelResource, withExtension: "mlmodelc") else {
+    let modelName = modelDisplayName(defaultModel)
+    guard let model = Bundle.main.url(forResource: defaultModel, withExtension: "mlmodelc") else {
         print(AudioError.noModel(modelName))
         exit(1)
     }
