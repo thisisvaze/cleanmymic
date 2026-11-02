@@ -1,2 +1,2 @@
-# Required owner approval takes effect only when the repository ruleset is active.
+# The main ruleset requires approval from these owners.
 * @thisisvaze

@@ -14,17 +14,19 @@ App version: `0.1.0`, build `1`. Python version: `0.1.0a1`. Installer receipt ve
 | Models | Base is bundled in the installer, with its weight hash in `build.json` | Verify the same model is in the final signed artifact |
 | Installation | Signed, notarized `.pkg`; payload checks pass; source/notices included | Clean-Mac install/upgrade/removal tests |
 | Public contents | The public repository starts from a fresh history; development history stays private | — |
-| Review protection | Draft PR, manual owner merge | Activate and verify the proposed ruleset |
+| Review protection | Rulesets active on `main` and `v*` tags; outside PRs need approval before CI runs | — |
 
 The source and routing CI passes on the implementation commit, and local checks cover bypass/resume and capture starting/stopping for virtual-mic consumers. They do not establish real Meet/Zoom reliability, Bluetooth recovery, battery use, or end-to-end latency. [Benchmark scope](benchmarks.md) and the [known failure](../INSTALL.md#voice-cuts-out) remain part of release review.
 
 ## Review and merge
 
-Changes go through draft PRs; the owner reviews and merges manually. Auto-merge is off. Until the ruleset below is active, owner review is an instruction, not an enforced gate.
+Changes go through draft PRs; the owner reviews and merges manually. Auto-merge is off. Since November 2, 2026, the rulesets below enforce this.
 
-The proposed [main ruleset](../.github/main-ruleset.json) requires a PR, code-owner approval, resolved conversations, and passing `Source checks` on an up-to-date branch; it blocks direct pushes, force pushes, and deletion. Its PR-only bypass lets `thisisvaze` (user ID `11044960`) manually merge owner-authored PRs, since authors cannot approve themselves. It cannot distinguish the owner from tools using the owner's credentials.
+The [main ruleset](../.github/main-ruleset.json) requires a PR, code-owner approval, resolved conversations, and passing `Source checks` on an up-to-date branch; it blocks direct pushes, force pushes, and deletion. Its PR-only bypass lets `thisisvaze` (user ID `11044960`) manually merge owner-authored PRs, since authors cannot approve themselves. It cannot distinguish the owner from tools using the owner's credentials.
 
-The JSON is inactive. Activate and verify it:
+The [tag ruleset](../.github/tag-ruleset.json) blocks deleting or moving `v*` release tags; the owner can bypass it to repoint a tag at a rebuilt release. Workflows from outside contributors' PRs wait for owner approval, and private vulnerability reporting is on.
+
+Both rulesets were created from these files on November 2, 2026. To recreate one, or to check what is enforced:
 
 ```sh
 gh api --method POST repos/thisisvaze/cleanmymic/rulesets --input .github/main-ruleset.json
