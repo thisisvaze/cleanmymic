@@ -72,6 +72,23 @@ nonisolated func isBuiltIn(_ id: AudioDeviceID) -> Bool {
     return ok && transport == kAudioDeviceTransportTypeBuiltIn
 }
 
+/// The Mac's own speakers: a headphone test through them feeds the voice back into the mic.
+// ponytail: only built-in speakers are detected; external speakers look like headphones to Core Audio.
+nonisolated func isBuiltInSpeaker(_ id: AudioDeviceID) -> Bool {
+    var addr = address(kAudioDevicePropertyDataSource, kAudioObjectPropertyScopeOutput)
+    var source = UInt32(0)
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    let ok = AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &source) == noErr
+    return isBuiltIn(id) && ok && source == 0x6973_706B  // 'ispk', internal speaker
+}
+
+/// Why "Hear yourself" can't start now, or nil.
+nonisolated func headphoneTestBlocker(output: AudioDevice?, isSpeaker: Bool, inCall: Bool) -> String? {
+    if inCall { return "Unavailable while an app uses CleanMyMic" }
+    guard let output, output.outputs, output.uid != cableUID else { return "No headphones found" }
+    return isSpeaker ? "Connect headphones: speakers would echo" : nil
+}
+
 /// Calls action, on the main queue, whenever a property of the audio system changes.
 nonisolated func watch(_ selector: AudioObjectPropertySelector, _ action: @escaping @Sendable () -> Void) {
     var addr = address(selector)

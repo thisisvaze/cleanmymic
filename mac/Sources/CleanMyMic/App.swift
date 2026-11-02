@@ -33,7 +33,10 @@ final class Controller {
     var noiseRemoval: Bool { didSet { defaults.set(noiseRemoval, forKey: "enabled"); pipeline?.setMix(mix) } }
     var inputUID: String { didSet { defaults.set(inputUID, forKey: "input"); restart() } }  // "": automatic
     var strength: Double { didSet { defaults.set(strength, forKey: "strength"); pipeline?.setMix(mix) } }
+    /// Hear yourself through headphones, to compare noise removal on and off. A call app opening the mic ends it.
+    var testing = false { didSet { if testing != oldValue { restart() } } }
     var devices = audioDevices()
+    private(set) var headphones = defaultDevice(input: false)  // where a test plays: the system output
     private(set) var status = "Starting…"
     private(set) var isRunning = false
     private var pipeline: Pipeline?
@@ -52,7 +55,20 @@ final class Controller {
         try? SMAppService.mainApp.register()  // start at login
         watch(kAudioHardwarePropertyDefaultInputDevice) { [weak self] in Task { @MainActor in self?.systemMicChanged() } }
         watch(kAudioHardwarePropertyDevices) { [weak self] in Task { @MainActor in self?.devicesChanged() } }
+        watch(kAudioHardwarePropertyDefaultOutputDevice) { [weak self] in Task { @MainActor in self?.outputChanged() } }
         restart()
+    }
+
+    var headphoneName: String { devices.first { $0.id == headphones }?.name ?? "your headphones" }
+    var testBlocker: String? {
+        headphoneTestBlocker(output: devices.first { $0.id == headphones },
+                             isSpeaker: headphones.map(isBuiltInSpeaker) ?? false, inCall: isRunning && !testing)
+    }
+
+    private func outputChanged() {
+        headphones = defaultDevice(input: false)
+        guard testing else { return }
+        if testBlocker == nil { restart() } else { testing = false }  // e.g. headphones unplugged: off, not speakers
     }
 
     var microphones: [AudioDevice] { devices.filter(\.isMicrophoneSource) }
@@ -169,7 +185,8 @@ final class Controller {
             destination = output.id
             try route()
             consumerActive = try deviceIsRunning(mic.id)
-            guard consumerActive else { status = "Ready"; return }
+            if testing && (consumerActive || testBlocker != nil) { testing = false; return }  // didSet restarts
+            guard consumerActive || testing else { status = "Ready"; return }
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
             guard gen == generation else { return }
             guard granted else {
@@ -177,17 +194,21 @@ final class Controller {
                 return
             }
             consumerActive = try deviceIsRunning(mic.id)
-            guard consumerActive else { status = "Ready"; return }
+            if testing && consumerActive { testing = false; return }
+            guard consumerActive || testing, let target = testing ? headphones : output.id else {
+                status = "Ready"
+                return
+            }
             let onError: @Sendable (String) -> Void = { [weak self] message in
                 Task { @MainActor in self?.failed(message, gen) }
             }
-            let p = try await Self.makePipeline(model: model, input: input, output: output.id, mix: mix,
+            let p = try await Self.makePipeline(model: model, input: input, output: target, mix: mix,
                                                 onError: onError)
             guard gen == generation else { return await Self.stop(p) }  // switched again while this one loaded
             pipeline = p
             p.setMix(mix)
             isRunning = true
-            status = "In use"
+            status = testing ? "Testing" : "In use"
         } catch {
             failed(String(describing: error), gen)
         }
