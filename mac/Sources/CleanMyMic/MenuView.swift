@@ -41,14 +41,14 @@ struct MenuView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Picker("Microphone", selection: $controller.inputUID) {
                         Text("Automatic").tag("")
-                        if !controller.inputUID.isEmpty
-                            && !controller.microphones.contains(where: { $0.uid == controller.inputUID }) {
-                            Text("Preferred microphone unavailable").tag(controller.inputUID)
+                        if controller.preferredMissing {
+                            Text("\(controller.preferredName) (not connected)").tag(controller.inputUID)
                         }
                         ForEach(controller.microphones) { Text($0.name).tag($0.uid) }
                     }
                     .help("Using \(controller.microphoneName)")
-                    Text("Choose CleanMyMic as the microphone in your call app.")
+                    Text(controller.preferredMissing ? "Using \(controller.microphoneName) until it reconnects."
+                         : "Choose CleanMyMic as the microphone in your call app.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

@@ -30,6 +30,9 @@ import Testing
         AudioDevice(id: 3, uid: cableUID, name: "Cable", inputs: true, outputs: true),
         AudioDevice(id: 4, uid: "blackhole", name: "BlackHole 2ch", inputs: true, outputs: true),
         AudioDevice(id: 5, uid: "speakers", name: "Speakers", inputs: false, outputs: true),
+        AudioDevice(id: 6, uid: "CADefaultDeviceAggregate-123-1", name: "CADefaultDeviceAggregate-123-1",
+                    inputs: true, outputs: true),
+        AudioDevice(id: 7, uid: "zoom", name: "ZoomAudioDevice", inputs: true, outputs: true, isVirtual: true),
     ]
     #expect(devices.filter(\.isMicrophoneSource).map(\.uid) == ["physical"])
 }
