@@ -16,7 +16,7 @@ struct MenuView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CleanMyMic").font(.headline)
-                    Text(controller.noiseRemoval || controller.testing ? stateLabel : "Off · \(stateLabel)")
+                    Text(controller.noiseRemoval ? stateLabel : "Off · \(stateLabel)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -24,9 +24,7 @@ struct MenuView: View {
                 Toggle("CleanMyMic", isOn: $controller.noiseRemoval)  // the main switch: what calls get
                     .labelsHidden()
                     .toggleStyle(.switch)
-                    .disabled(controller.testing)  // the test has its own Original | Cleaned
-                    .help(controller.testing ? "Calls keep this setting during the test"
-                          : "Off sends your original voice, uncleaned")
+                    .help("Off sends your original voice, uncleaned, and ends Mic check")
             }
             .padding(12)
 
@@ -60,15 +58,15 @@ struct MenuView: View {
                 Divider().padding(.horizontal, 12)
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Hear yourself")
+                        Text("Mic check")
                         Spacer()
-                        Toggle("Hear yourself", isOn: $controller.testing)
+                        Toggle("Mic check", isOn: $controller.testing)
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .disabled(!controller.testing && controller.testBlocker != nil)
                     }
                     Text(controller.testing ? "Playing in \(controller.headphoneName). Calls aren't affected."
-                         : controller.testBlocker ?? "Test in your headphones before a call.")
+                         : controller.testBlocker ?? "Hear your mic in headphones before a call.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

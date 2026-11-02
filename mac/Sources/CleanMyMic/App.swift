@@ -45,12 +45,18 @@ nonisolated func modelDisplayName(_ resource: String) -> String {
 @Observable
 final class Controller {
     private let defaults = UserDefaults.standard
-    var noiseRemoval: Bool { didSet { defaults.set(noiseRemoval, forKey: "enabled"); pipeline?.setMix(mix) } }
+    var noiseRemoval: Bool {
+        didSet {
+            defaults.set(noiseRemoval, forKey: "enabled")
+            if !noiseRemoval { testing = false }  // off ends the headphone test (its didSet restarts)
+            pipeline?.setMix(mix)
+        }
+    }
     var inputUID: String { didSet { defaults.set(inputUID, forKey: "input"); restart() } }  // "": automatic
     var strength: Double { didSet { defaults.set(strength, forKey: "strength"); pipeline?.setMix(mix) } }
     var model: String { didSet { if model != oldValue { defaults.set(model, forKey: "model"); restart() } } }
     let models = bundledModels()
-    /// Hear yourself through headphones, to compare original and cleaned. A call app opening the mic ends it.
+    /// Mic check: hear yourself through headphones, to compare original and cleaned. A call app opening the mic ends it.
     var testing = false { didSet { if testing != oldValue { testCleaned = true; restart() } } }
     /// The test's own comparison: never changes `noiseRemoval`, which is what calls get.
     var testCleaned = true { didSet { pipeline?.setMix(mix) } }
@@ -74,6 +80,10 @@ final class Controller {
         let saved = defaults.string(forKey: "model") ?? defaultModel
         model = models.contains(saved) ? saved : defaultModel  // a model dropped from the app falls back to Base
         try? SMAppService.mainApp.register()  // start at login
+        // Ask for the mic up front: the system prompt takes focus, which would close the menu panel mid-toggle.
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            Task { _ = await AVCaptureDevice.requestAccess(for: .audio) }
+        }
         watch(kAudioHardwarePropertyDefaultInputDevice) { [weak self] in Task { @MainActor in self?.systemMicChanged() } }
         watch(kAudioHardwarePropertyDevices) { [weak self] in Task { @MainActor in self?.devicesChanged() } }
         watch(kAudioHardwarePropertyDefaultOutputDevice) { [weak self] in Task { @MainActor in self?.outputChanged() } }

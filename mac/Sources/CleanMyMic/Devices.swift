@@ -82,7 +82,7 @@ nonisolated func isBuiltInSpeaker(_ id: AudioDeviceID) -> Bool {
     return isBuiltIn(id) && ok && source == 0x6973_706B  // 'ispk', internal speaker
 }
 
-/// Why "Hear yourself" can't start now, or nil.
+/// Why "Mic check" can't start now, or nil.
 nonisolated func headphoneTestBlocker(output: AudioDevice?, isSpeaker: Bool, inCall: Bool) -> String? {
     if inCall { return "Unavailable while an app uses CleanMyMic" }
     guard let output, output.outputs, output.uid != cableUID else { return "No headphones found" }
