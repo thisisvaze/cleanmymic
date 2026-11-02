@@ -25,18 +25,23 @@ unavailable, tell me exactly what is missing before making system changes.
 
 ## Hear it
 
-Two 10-second examples with stronger background noise, from scripted calls recorded in real environments. No added noise; the same playback gain is applied to every version of a clip. Open the WAV links to compare at the same volume.
+Three 10-second clips from real office, call-center, and car recordings with strong background noise; no noise was added. Play the original, CleanMyMic Base, and Krisp or DeepFilterNet3 side by side at the same volume:
 
-| Example | Original | CleanMyMic Base |
-|---|---|---|
-| Office · overlapping voices | [Before](docs/audio/work-raw.wav?raw=true) | [After](docs/audio/work-base.wav?raw=true) |
-| Car · cabin noise | [Before](docs/audio/phone_calls-raw.wav?raw=true) | [After](docs/audio/phone_calls-base.wav?raw=true) |
+**[▶ Listen in your browser](https://thisisvaze.github.io/cleanmymic/audio/)**
 
-[All examples, DeepFilterNet3 and Krisp comparisons, and sources →](docs/audio/README.md) · Audio © Krisp Technologies · CC BY-NC 4.0.
+Audio © Krisp Technologies · CC BY-NC 4.0 · [Sources and method →](docs/audio/README.md)
 
-## Development results
+## Benchmarks
 
-CleanMyMic Base improves transcription on some development call sets and worsens speech retention on others. Neither average scores nor processing speed establish reliable live-call behavior. [Quality results, Mac measurements, and limits →](docs/benchmarks.md)
+Word error rate on Krisp's real-world [Voice Isolation Benchmark](https://huggingface.co/datasets/Krisp-AI/VoiceIsolation-Benchmark-Dataset): mean per-clip WER from Whisper large-v3-turbo, 40 clips per set, lower is better. Measured October 31, 2026 for CleanMyMic Base.
+
+| Set | Raw input | CleanMyMic Base | Krisp VI 2.5 HD | DeepFilterNet3 |
+|---|---:|---:|---:|---:|
+| Work calls | 26.1% | 9.7% | 10.3% | 20.6% |
+| Call center | 20.3% | 13.1% | 14.8% | 19.8% |
+| Phone calls | 3.8% | 4.1% | 4.3% | 6.3% |
+
+Krisp is its published benchmark output, not the current Krisp app; DeepFilterNet3 is stock 0.5.6. The gaps to Krisp are small and uncertain (few speakers per set), so this is not a ranking. Base removes background voices well on work and call-center calls (about 30 dB) but poorly on phone calls, and it costs some words on clean speech (6.5% vs 3.1% WER on DAPS). On an M5 Pro it takes 0.21 ms per 10 ms audio frame. [Full results, uncertainty, and method →](docs/benchmarks.md)
 
 ## Code
 
