@@ -45,7 +45,13 @@ nonisolated func modelDisplayName(_ resource: String) -> String {
 @Observable
 final class Controller {
     private let defaults = UserDefaults.standard
-    var noiseRemoval: Bool { didSet { defaults.set(noiseRemoval, forKey: "enabled"); pipeline?.setMix(mix) } }
+    var noiseRemoval: Bool {
+        didSet {
+            defaults.set(noiseRemoval, forKey: "enabled")
+            if !noiseRemoval { testing = false }  // off ends the headphone test (its didSet restarts)
+            pipeline?.setMix(mix)
+        }
+    }
     var inputUID: String { didSet { defaults.set(inputUID, forKey: "input"); restart() } }  // "": automatic
     var strength: Double { didSet { defaults.set(strength, forKey: "strength"); pipeline?.setMix(mix) } }
     var model: String { didSet { if model != oldValue { defaults.set(model, forKey: "model"); restart() } } }

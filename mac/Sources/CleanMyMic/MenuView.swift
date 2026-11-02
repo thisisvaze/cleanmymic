@@ -16,7 +16,7 @@ struct MenuView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CleanMyMic").font(.headline)
-                    Text(controller.noiseRemoval || controller.testing ? stateLabel : "Off · \(stateLabel)")
+                    Text(controller.noiseRemoval ? stateLabel : "Off · \(stateLabel)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -24,9 +24,7 @@ struct MenuView: View {
                 Toggle("CleanMyMic", isOn: $controller.noiseRemoval)  // the main switch: what calls get
                     .labelsHidden()
                     .toggleStyle(.switch)
-                    .disabled(controller.testing)  // the test has its own Original | Cleaned
-                    .help(controller.testing ? "Calls keep this setting during the test"
-                          : "Off sends your original voice, uncleaned")
+                    .help("Off sends your original voice, uncleaned, and ends Hear yourself")
             }
             .padding(12)
 
