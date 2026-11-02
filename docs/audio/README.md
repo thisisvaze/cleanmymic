@@ -1,6 +1,6 @@
 # Real-call comparisons
 
-Three 10-second excerpts chosen for stronger background noise from Krisp's real-world voice-isolation benchmark: scripted speech captured in actual offices, call centers, and cars, with no synthetic mixing. Open [index.html](index.html) from a local checkout for the comparison player. GitHub displays the HTML as source.
+Three 10-second excerpts chosen for stronger background noise from Krisp's real-world voice-isolation benchmark: scripted speech captured in actual offices, call centers, and cars, with no synthetic mixing. [Listen in your browser](https://thisisvaze.github.io/cleanmymic/audio/) with the comparison player.
 
 | Recording | Original | CleanMyMic Base | DeepFilterNet3 | Krisp VI 2.5 HD |
 |---|---|---|---|---|
