@@ -52,12 +52,12 @@ The driver build downloads pinned BlackHole source. Installation asks for an adm
 ## First use
 
 1. Open CleanMyMic. **Using** shows the physical microphone chosen automatically. Click it to select MacBook, AirPods, or another mic yourself.
-2. In Meet, Zoom, or another call app, select **CleanMyMic** as the microphone. Keep that selection whether noise removal is on or off. CleanMyMic manages **macOS Sound → Input** automatically.
+2. In Meet, Zoom, or another call app, select **CleanMyMic** as the microphone. Keep that selection whether CleanMyMic is switched on or off. CleanMyMic manages **macOS Sound → Input** automatically.
 3. Allow microphone access when macOS asks, then use your call app's microphone test. **Ready** means no app is using the virtual microphone; **In use** means audio is flowing.
 
-**Noise removal on** sends cleaned audio. **Off** passes your original voice through; it does not mute or disconnect the microphone. **Settings** contains the strength slider. Automatic follows the physical mic selected by macOS and falls back to an available mic if that device disconnects; a manual choice takes priority while available.
+The switch at the top right of the panel is the main control: **on** sends cleaned audio, **off** passes your original voice through; it does not mute or disconnect the microphone. **Settings…** at the bottom of the panel opens the Settings window, with cleanup strength and the model. **Hear yourself** plays your mic to your headphones so you can compare **Original** and **Cleaned** before a call; it does not change what calls get. Automatic follows the physical mic selected by macOS and falls back to an available mic if that device disconnects; a manual choice takes priority while available.
 
-When the last app stops using the virtual microphone, CleanMyMic releases your physical mic and returns to **Ready**. macOS shows its microphone indicator during capture, including when noise removal is off. An app's mute button may leave its microphone open; end the call or quit CleanMyMic to release it. Quitting restores a physical macOS input, but apps explicitly using CleanMyMic must switch to a physical mic if you want to keep talking.
+When the last app stops using the virtual microphone, CleanMyMic releases your physical mic and returns to **Ready**. macOS shows its microphone indicator during capture, including when CleanMyMic is switched off. An app's mute button may leave its microphone open; end the call or quit CleanMyMic to release it. Quitting restores a physical macOS input, but apps explicitly using CleanMyMic must switch to a physical mic if you want to keep talking.
 
 The app registers to open at login. You can manage that in **System Settings → General → Login Items**. Audio enhancement runs locally; it does not need a cloud account or API key.
 
@@ -65,7 +65,7 @@ The app registers to open at login. You can manage that in **System Settings →
 
 Intermittent voice loss has been reported with AirPods Pro in a noisy café on Google Meet, while background audio remained audible. It is not fixed or isolated to a specific processing stage. For important calls, select your physical microphone directly in the call app to bypass CleanMyMic.
 
-For a short diagnostic test, keep the physical mic unchanged and select **CleanMyMic** in Meet. Turn Meet's **Settings → Audio → Noise cancellation** off to isolate its additional processing, then compare CleanMyMic's noise removal off/on. Off passes original audio; it is not mute. If speech disappears only with cleanup on, report that result. If it also disappears with cleanup off, compare the physical microphone directly. This is a diagnostic comparison, not a verified fix. [Meet's audio processing](https://support.google.com/meet/answer/14441737)
+For a short diagnostic test, keep the physical mic unchanged and select **CleanMyMic** in Meet. Turn Meet's **Settings → Audio → Noise cancellation** off to isolate its additional processing, then compare CleanMyMic switched off and on. Off passes original audio; it is not mute. If speech disappears only with cleanup on, report that result. If it also disappears with cleanup off, compare the physical microphone directly. This is a diagnostic comparison, not a verified fix. [Meet's audio processing](https://support.google.com/meet/answer/14441737)
 
 When reporting a failure, include the app version, physical microphone, call-app input, strength, other noise-cancellation settings, and whether bypass restored speech. Share a short audio example only if you have permission; recordings are not collected automatically.
 
