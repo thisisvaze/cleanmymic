@@ -33,8 +33,10 @@ final class Controller {
     var noiseRemoval: Bool { didSet { defaults.set(noiseRemoval, forKey: "enabled"); pipeline?.setMix(mix) } }
     var inputUID: String { didSet { defaults.set(inputUID, forKey: "input"); restart() } }  // "": automatic
     var strength: Double { didSet { defaults.set(strength, forKey: "strength"); pipeline?.setMix(mix) } }
-    /// Hear yourself through headphones, to compare noise removal on and off. A call app opening the mic ends it.
-    var testing = false { didSet { if testing != oldValue { restart() } } }
+    /// Hear yourself through headphones, to compare original and cleaned. A call app opening the mic ends it.
+    var testing = false { didSet { if testing != oldValue { testCleaned = true; restart() } } }
+    /// The test's own comparison: never changes `noiseRemoval`, which is what calls get.
+    var testCleaned = true { didSet { pipeline?.setMix(mix) } }
     var devices = audioDevices()
     private(set) var headphones = defaultDevice(input: false)  // where a test plays: the system output
     private(set) var status = "Starting…"
@@ -73,7 +75,7 @@ final class Controller {
 
     var microphones: [AudioDevice] { devices.filter(\.isMicrophoneSource) }
     var microphoneName: String { devices.first { $0.id == source() }?.name ?? "No microphone found" }
-    private var mix: Float { noiseRemoval ? Float(strength) : 0 }
+    private var mix: Float { (testing ? testCleaned : noiseRemoval) ? Float(strength) : 0 }
 
     /// Keep one call-app device for both cleaned and original voice; remember the physical mic across restarts.
     private func route() throws {

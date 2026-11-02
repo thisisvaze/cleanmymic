@@ -48,7 +48,7 @@ struct MenuView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Hear yourself").font(.system(size: 12, weight: .medium))
-                    Text(controller.testing ? "In \(controller.headphoneName) · flip noise removal to compare"
+                    Text(controller.testing ? "Playing in \(controller.headphoneName)"
                          : controller.testBlocker ?? "Test in your headphones before a call")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -63,7 +63,20 @@ struct MenuView: View {
                     .help("Plays your microphone to your headphones while this panel is open")
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+            .padding(.bottom, controller.testing ? 10 : 16)
+
+            if controller.testing {
+                Picker("Compare", selection: $controller.testCleaned) {
+                    Text("Original").tag(false)
+                    Text("Cleaned").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .help("Only for this test; calls keep the Noise removal setting")
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+            }
 
             MicrophoneMenu(selection: $controller.inputUID, devices: controller.microphones,
                            deviceName: controller.microphoneName)
