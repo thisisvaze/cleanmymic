@@ -1,4 +1,4 @@
-![cleanmymic — private, offline studio-quality mic for Apple silicon](docs/images/cover.webp)
+![cleanmymic — private, offline and cleaner mic for Apple silicon](docs/images/cover.webp)
 
 # CleanMyMic
 
