@@ -13,6 +13,16 @@ import Testing
                                                inputs: true, outputs: false)]) == nil)
 }
 
+@Test func headphoneTestNeedsHeadphonesAndNoCall() {
+    let headphones = AudioDevice(id: 3, uid: "airpods", name: "AirPods", inputs: true, outputs: true)
+    let cable = AudioDevice(id: 2, uid: cableUID, name: "Hidden cable", inputs: false, outputs: true)
+    #expect(headphoneTestBlocker(output: headphones, isSpeaker: false, inCall: false) == nil)
+    #expect(headphoneTestBlocker(output: headphones, isSpeaker: true, inCall: false) != nil)  // feedback
+    #expect(headphoneTestBlocker(output: headphones, isSpeaker: false, inCall: true) != nil)  // the call keeps the mic
+    #expect(headphoneTestBlocker(output: cable, isSpeaker: false, inCall: false) != nil)  // would reach the call app
+    #expect(headphoneTestBlocker(output: nil, isSpeaker: false, inCall: false) != nil)
+}
+
 @Test func microphoneChoicesExcludeLoopbackAndOutputDevices() {
     let devices = [
         AudioDevice(id: 1, uid: "physical", name: "Mac microphone", inputs: true, outputs: false),

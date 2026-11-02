@@ -5,7 +5,7 @@ struct MenuView: View {
     @State private var showsSettings = false
 
     private var stateLabel: String {
-        if controller.isRunning { return "In use" }
+        if controller.isRunning { return controller.status }
         return ["Starting…", "Ready"].contains(controller.status) ? controller.status : "Needs attention"
     }
 
@@ -41,6 +41,26 @@ struct MenuView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .help("Off sends your original voice without noise removal")
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Hear yourself").font(.system(size: 12, weight: .medium))
+                    Text(controller.testing ? "In \(controller.headphoneName) · flip noise removal to compare"
+                         : controller.testBlocker ?? "Test in your headphones before a call")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle("Hear yourself", isOn: $controller.testing)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(!controller.testing && controller.testBlocker != nil)
+                    .help("Plays your microphone to your headphones while this panel is open")
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
@@ -95,6 +115,7 @@ struct MenuView: View {
         }
         .frame(width: 320)
         .onAppear { controller.refresh() }
+        .onDisappear { controller.testing = false }  // never left playing into headphones unseen
     }
 
     private var settings: some View {
