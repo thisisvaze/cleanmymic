@@ -6,13 +6,13 @@ Quality scored October 31, 2026 for **CleanMyMic Base**, the app's default check
 
 ## Word retention
 
-Mean per-clip word error, capped at 100%; lower is better. Each row uses the same 40 clips for every system.
+Mean per-clip word error, capped at 100%; lower is better, best in each row in bold. Each row uses the same 40 clips for every system.
 
 | Set | Raw input | CleanMyMic Base | Krisp VI 2.5 HD | DeepFilterNet3 |
 |---|---:|---:|---:|---:|
-| Work calls | 26.1% | 9.7% | 10.3% | 20.6% |
-| Call center | 20.3% | 13.1% | 14.8% | 19.8% |
-| Phone calls | 3.8% | 4.1% | 4.3% | 6.3% |
+| Work calls | 26.1% | **9.7%** | 10.3% | 20.6% |
+| Call center | 20.3% | **13.1%** | 14.8% | 19.8% |
+| Phone calls | **3.8%** | 4.1% | 4.3% | 6.3% |
 
 [Per-clip numeric results](benchmark-data/quality-pilot-20261031.csv) and [provenance, corpus WER, and uncertainty](benchmark-data/quality-pilot-20261031.json) cover all five systems and eight sets: 1,400 system/clip results. Original transcripts and audio are not included.
 
@@ -20,13 +20,13 @@ Base minus Krisp work-call WER is −0.64 percentage points, with a paired speak
 
 ## Background voices
 
-Suppression during annotated secondary-speaker-only regions, averaged per clip in dB; higher is better. This table applies the same **48 kHz, 16-bit PCM export** to every system's output. Existing quantization and bandwidth limits in competitor files cannot be undone.
+Suppression during annotated secondary-speaker-only regions, averaged per clip in dB; higher is better, best in each row in bold. This table applies the same **48 kHz, 16-bit PCM export** to every system's output. Existing quantization and bandwidth limits in competitor files cannot be undone.
 
 | Set | Qualifying clips | CleanMyMic Base | Krisp VI 2.5 HD | DeepFilterNet3 |
 |---|---:|---:|---:|---:|
-| Work calls | 40 | 32.3 dB | 30.9 dB | 14.8 dB |
-| Call center | 39 | 29.6 dB | 29.4 dB | 18.6 dB |
-| Phone calls | **4** | 5.9 dB | 17.9 dB | 37.4 dB |
+| Work calls | 40 | **32.3 dB** | 30.9 dB | 14.8 dB |
+| Call center | 39 | **29.6 dB** | 29.4 dB | 18.6 dB |
+| Phone calls | **4** | 5.9 dB | 17.9 dB | **37.4 dB** |
 
 Phone suppression remains a weakness, with particularly little evidence. Suppression alone rewards silencing everything; read it alongside word retention. These regions do not measure separation while both people speak.
 
@@ -58,6 +58,16 @@ This does not measure live-call latency, battery life, long-session reliability,
 On November 1, an isolated per-frame test of the same Base weights on an **M5 Pro, macOS 27.2** measured **0.212 ms mean processing per 10 ms frame** across 17,555 frames from three existing call-recording prefixes. Each clip's p95 was below 0.24 ms; none exceeded 10 ms. [Timing method, hashes, and per-clip results](benchmark-data/base-coreml-timing-20261101.json) identify the measured source and inputs. This single unpaced run excludes model loading, file IO, device routing, and call-app/network buffering. It is a different workload from the earlier file-processing test, not proof of a model optimization or a CPU-utilization measurement.
 
 Model metadata specifies a 20 ms window and two 10 ms look-ahead hops: **40 ms window-plus-look-ahead latency**, before processing and device/call buffering. File output shifts by 30 ms because of overlap and padding. Neither figure is a measured end-to-end call delay. These timings establish processing headroom on this M5 Pro, not speech preservation or performance across all Apple Silicon Macs.
+
+## Resource use
+
+Measured November 2, 2026 on an **M5 Pro, macOS 27.2**, with the app's built-in check (`CleanMyMic --check "MacBook Pro Microphone" "CleanMyMic (for calls)"`; app build `e0df54c`, same audio pipeline as `main`). It runs live microphone audio through Base into the virtual microphone for two 4-second runs, switching cleanup on and off each second. Both runs kept real time at about 100 frames per second.
+
+- **CPU:** 0.14 s of process CPU time over a steady 5-second window, about 3% of one core. Core ML may also schedule work on the Neural Engine, which this does not count.
+- **Memory:** 43 MB resident throughout.
+- **Size:** the compiled Base model is 8.4 MB; the installer with app, virtual microphone, and model is 13.6 MB.
+
+One short run on one Mac, not an energy or battery measurement.
 
 ## Reproduce scoring
 
