@@ -2,17 +2,22 @@
 
 # CleanMyMic
 
-Experimental microphone cleanup for Mac, processed locally with Core ML. Choose CleanMyMic in your call app, then switch it on for cleaned audio or off for your original voice. Your physical microphone is chosen automatically.
+Removes background noise and nearby voices from your microphone in Zoom, Meet, Teams, and any other app. It runs entirely on your Mac: no account, no cloud.
 
-**v0.1.0-alpha.1 — Experimental preview.** One installer bundles the app, virtual microphone, and Base model. [Download from Releases →](https://github.com/thisisvaze/cleanmymic/releases/latest) · [Release notes →](docs/releases/v0.1.0-alpha.1.md)
+**[⬇ Download for Mac](https://github.com/thisisvaze/cleanmymic/releases/download/v0.1.0-alpha.1/CleanMyMic-0.1.0-alpha.1-arm64.pkg)** · Apple Silicon, macOS 15 or later · [▶ Hear samples](https://thisisvaze.github.io/cleanmymic/audio/)
 
-**Known issue:** intermittent voice loss has been reported in a noisy café call using AirPods Pro and Google Meet, while background audio remained audible. The cause is unresolved. Use a physical microphone directly in your call app for important calls. [Setup and troubleshooting →](INSTALL.md#voice-cuts-out)
+## Get started
 
-## Install
+1. **Install.** Open the downloaded `.pkg` and follow the installer. It asks for your Mac's password.
+2. **Restart your Mac** so the CleanMyMic microphone appears.
+3. **Open CleanMyMic** from Applications and allow microphone access. It lives in your menu bar.
+4. **Pick CleanMyMic as the microphone** in your call app, and turn the app's own noise suppression off or to Low.
 
-Requires an **Apple Silicon Mac with macOS 15 or later**.
+Put on headphones and try **Mic check** in the menu bar to hear the difference. The switch at the top turns cleanup on or off; your call app keeps the same microphone either way.
 
-### Ask your agent
+**Experimental preview** · [Known issues](https://github.com/thisisvaze/cleanmymic/issues?q=is%3Aissue%20state%3Aopen%20label%3Abug) · [Release notes](docs/releases/v0.1.0-alpha.1.md) · [Setup and troubleshooting](INSTALL.md)
+
+### Or ask your agent
 
 Paste this into Codex, Claude Code, or another coding agent:
 

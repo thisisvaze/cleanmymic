@@ -63,6 +63,8 @@ The app registers to open at login. You can manage that in **System Settings →
 
 ## Voice cuts out
 
+Tracked in [issue #8](https://github.com/thisisvaze/cleanmymic/issues/8); add your results there.
+
 Intermittent voice loss has been reported with AirPods Pro in a noisy café on Google Meet, while background audio remained audible. It is not fixed or isolated to a specific processing stage. For important calls, select your physical microphone directly in the call app to bypass CleanMyMic.
 
 For a short diagnostic test, keep the physical mic unchanged and select **CleanMyMic** in Meet. Turn Meet's **Settings → Audio → Noise cancellation** off to isolate its additional processing, then compare CleanMyMic switched off and on. Off passes original audio; it is not mute. If speech disappears only with cleanup on, report that result. If it also disappears with cleanup off, compare the physical microphone directly. This is a diagnostic comparison, not a verified fix. [Meet's audio processing](https://support.google.com/meet/answer/14441737)
