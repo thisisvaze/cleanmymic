@@ -70,6 +70,27 @@ import Testing
     #expect(change(nil, "usb", enabled: false) == .none)
 }
 
+@Test func theAppsOwnRecordingDoesNotCountAsSomeoneUsingTheMic() {
+    func alone(_ readers: [(pid: pid_t, uids: [String])]) -> Bool { onlySelfRecords(from: micUID, readers: readers, me: 7) }
+    #expect(alone([(7, [micUID])]))
+    #expect(!alone([(7, [micUID]), (8, [micUID])]))  // Sound settings showing the level, say
+    #expect(!alone([(7, [micUID]), (8, ["CADefaultDeviceAggregate-812-0"])]))  // may wrap the mic: assume it does
+    #expect(!alone([(8, [micUID])]))
+    #expect(!alone([(7, ["airpods"]), (8, ["usb"])]))  // the normal case: we read the physical mic
+    #expect(alone([(7, [micUID]), (8, ["usb"])]))
+}
+
+@Test func aHungAudioPathIsNoticedWhetherStartingOrRunning() {
+    let now = Date()
+    func stuck(_ starting: TimeInterval?, running: Bool = false, healthy: TimeInterval = 0) -> Bool {
+        audioIsStuck(startingSince: starting.map { now.addingTimeInterval(-$0) }, running: running,
+                     lastHealthy: now.addingTimeInterval(-healthy), now: now)
+    }
+    #expect(!stuck(5) && stuck(16))  // a slow first model load is fine, a start that never ends is not
+    #expect(!stuck(nil, running: true, healthy: 6) && stuck(nil, running: true, healthy: 16))
+    #expect(!stuck(nil, running: false, healthy: 600))  // idle and ready is not stuck
+}
+
 @Test func stalledPlaybackRetriesOnceUntilSamplesFlowAgain() {
     var watch = PlaybackWatch(recovering: false)
     let firstInterval = watch.advanced(to: 0)

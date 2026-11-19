@@ -1,6 +1,7 @@
 // Core Audio devices: physical microphones and the hidden output feeding our virtual microphone.
 import AudioToolbox
 import CoreAudio
+import Foundation
 
 nonisolated struct AudioDevice: Identifiable, Hashable, Sendable {
     let id: AudioDeviceID
@@ -58,6 +59,44 @@ nonisolated func deviceIsRunning(_ device: AudioDeviceID) throws -> Bool {
     let result = AudioObjectGetPropertyData(device, &property, 0, nil, &size, &running)
     guard result == noErr else { throw AudioError.activity(result) }
     return running != 0
+}
+
+/// True when this app is the only one recording from a device. Our own engine has ended up reading the virtual mic
+/// (it fell back to the system's default input), and counting that kept the app "in use" on its own silence.
+/// `readers`: each process that is recording, with the UIDs it records from.
+nonisolated func onlySelfRecords(from uid: String, readers: [(pid: pid_t, uids: [String])], me: pid_t) -> Bool {
+    guard readers.contains(where: { $0.pid == me && $0.uids.contains(uid) }) else { return false }
+    // Another app can reach a mic through Core Audio's private aggregate, so one of those counts as a possible reader.
+    return !readers.contains { $0.pid != me && $0.uids.contains { $0 == uid || $0.hasPrefix("CADefaultDeviceAggregate") } }
+}
+
+/// Whether another app is recording from a device. Falls back to "running somewhere" if readers cannot be listed.
+nonisolated func otherAppIsRecording(from device: AudioDeviceID) throws -> Bool {
+    guard try deviceIsRunning(device) else { return false }
+    let system = AudioObjectID(kAudioObjectSystemObject)
+    var readers: [(pid: pid_t, uids: [String])] = []
+    for process in objects(system, kAudioHardwarePropertyProcessObjectList) {
+        var addr = address(kAudioProcessPropertyIsRunningInput)
+        var recording = UInt32(0), pid = pid_t(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(process, &addr, 0, nil, &size, &recording) == noErr, recording != 0 else { continue }
+        addr = address(kAudioProcessPropertyPID)
+        size = UInt32(MemoryLayout<pid_t>.size)
+        guard AudioObjectGetPropertyData(process, &addr, 0, nil, &size, &pid) == noErr else { continue }
+        let inputs = objects(process, kAudioProcessPropertyDevices, kAudioObjectPropertyScopeInput)
+        readers.append((pid, inputs.map { string($0, kAudioDevicePropertyDeviceUID) }))
+    }
+    return !onlySelfRecords(from: string(device, kAudioDevicePropertyDeviceUID), readers: readers, me: getpid())
+}
+
+private nonisolated func objects(_ owner: AudioObjectID, _ selector: AudioObjectPropertySelector,
+                                 _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> [AudioObjectID] {
+    var addr = address(selector, scope)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(owner, &addr, 0, nil, &size) == noErr, size > 0 else { return [] }
+    var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(owner, &addr, 0, nil, &size, &ids) == noErr else { return [] }
+    return ids
 }
 
 nonisolated func audioDevices() -> [AudioDevice] {
@@ -145,6 +184,21 @@ nonisolated func setDevice(_ unit: AudioUnit, _ id: AudioDeviceID) throws {
     let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id,
                                       UInt32(MemoryLayout<AudioDeviceID>.size))
     guard status == noErr else { throw AudioError.device(status) }
+}
+
+/// The device an engine's I/O unit is on now.
+nonisolated func currentDevice(_ unit: AudioUnit) -> AudioDeviceID? {
+    var id = AudioDeviceID(0)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    let status = AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, &size)
+    return status == noErr && id != 0 ? id : nil
+}
+
+/// The audio path has hung: starting for too long, or running with no health check getting through.
+/// Seen live with AirPods changing mode: a recovery blocked inside AVAudioEngine and every restart queued behind it.
+nonisolated func audioIsStuck(startingSince: Date?, running: Bool, lastHealthy: Date, now: Date, limit: TimeInterval = 15) -> Bool {
+    if let startingSince { return now.timeIntervalSince(startingSince) > limit }
+    return running && now.timeIntervalSince(lastHealthy) > limit
 }
 
 nonisolated enum AudioError: Error, CustomStringConvertible {

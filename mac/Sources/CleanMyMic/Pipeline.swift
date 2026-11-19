@@ -24,6 +24,7 @@ nonisolated struct PlaybackWatch {
 
 nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio threads: mutable state is behind `lock`
     private let mic = AVAudioEngine(), out = AVAudioEngine()
+    private let input: AudioDeviceID, output: AudioDeviceID  // where each engine belongs; set again on every rewire
     private let mono = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
     private var sink: AVAudioSinkNode!, source: AVAudioSourceNode!
     private var format: AVAudioFormat?, converter: AVAudioConverter?  // the mic's; set only while `mic` is stopped
@@ -45,6 +46,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
         let enhancer = try Enhancer(model)
         enhancer.mix = mix
         (self.enhancer, self.mix, self.onError) = (enhancer, mix, onError)
+        (self.input, self.output) = (input, output)
         sink = AVAudioSinkNode { [unowned self] _, count, list in
             receive(list, count)
             return noErr
@@ -98,6 +100,14 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
 
     func setMix(_ m: Float) { lock.withLock { mix = m } }
 
+    /// False once an engine has drifted to another device. Seen live: both fell back to the system defaults, so the
+    /// app cleaned its own virtual mic and played into the headphones. Waits its turn behind any rewiring.
+    var onIntendedDevices: Bool {
+        rewiring.sync {
+            mic.inputNode.audioUnit.flatMap(currentDevice) == input && out.outputNode.audioUnit.flatMap(currentDevice) == output
+        }
+    }
+
     /// Average model time per 10 ms frame, in ms.
     var msPerFrame: Double { lock.withLock { frames > 0 ? busy / Double(frames) * 1000 : 0 } }
     var framesDone: Int { lock.withLock { frames } }
@@ -106,6 +116,10 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
     private func wire(mic isMic: Bool) throws {
         let engine = isMic ? mic : out
         engine.stop()
+        // An engine that lost its device carries on with the system default unless told again. A device that is
+        // gone fails here, and the controller starts over with whatever is connected now.
+        guard let unit = isMic ? mic.inputNode.audioUnit : out.outputNode.audioUnit else { throw AudioError.noInput }
+        try setDevice(unit, isMic ? input : output)
         if isMic {
             let f = mic.inputNode.inputFormat(forBus: 0)  // the device's format now; outputFormat can be stale after a change
             guard f.sampleRate > 0, f.channelCount > 0 else { throw AudioError.noInput }

@@ -76,7 +76,11 @@ final class Controller {
     var testCleaned = true { didSet { pipeline?.setMix(mix) } }
     var devices = audioDevices()
     private(set) var headphones = defaultDevice(input: false)  // where a test plays: the system output
-    private(set) var status = "Starting…"
+    private(set) var status = "Starting…" {
+        didSet { startingSince = status == "Starting…" ? startingSince ?? Date() : nil }
+    }
+    private var startingSince: Date?  // how long the app has been trying to start, for the stuck check
+    private var lastHealthy = Date()  // the last pass of the running pipeline's health loop
     private(set) var isRunning = false
     private var pipeline: Pipeline?
     private var cleaning: AudioDeviceID?  // the mic in use, or being started
@@ -110,7 +114,25 @@ final class Controller {
             Task { @MainActor in self?.restart() }
         }
         systemRouting.update(cleanupOn: noiseRemoval, allowClaim: true)
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkStuck() }
+        }
         restart()
+    }
+
+    /// A hung audio path cannot be stopped from inside, and reopening the app has cleared it every time: do that.
+    private func checkStuck() {
+        guard audioIsStuck(startingSince: startingSince, running: isRunning, lastHealthy: lastHealthy, now: Date()) else { return }
+        let last = defaults.object(forKey: "relaunched") as? Date ?? .distantPast
+        guard Date().timeIntervalSince(last) > 60 else {  // it did not help a minute ago: say so and stop trying
+            isRunning = false
+            status = "Audio is stuck. Quit and reopen CleanMyMic."
+            return
+        }
+        defaults.set(Date(), forKey: "relaunched")
+        let fresh = NSWorkspace.OpenConfiguration()
+        fresh.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: fresh) { _, _ in exit(0) }
     }
 
     var headphoneName: String { devices.first { $0.id == headphones }?.name ?? "your headphones" }
@@ -165,7 +187,7 @@ final class Controller {
     private func micUseChanged() {
         guard let device = observedMic else { return }
         do {
-            let active = try deviceIsRunning(device)
+            let active = try otherAppIsRecording(from: device)
             guard active != consumerActive else { return }
             consumerActive = active
             restart()
@@ -213,7 +235,7 @@ final class Controller {
             try observeMic(mic.id)
             cleaning = input
             destination = output.id
-            consumerActive = try deviceIsRunning(mic.id)
+            consumerActive = try otherAppIsRecording(from: mic.id)
             if testing && (consumerActive || testBlocker != nil) { testing = false; return }  // didSet restarts
             guard consumerActive || testing else { status = "Ready"; return }
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
@@ -222,7 +244,7 @@ final class Controller {
                 failed("Allow the mic: System Settings > Privacy & Security > Microphone", gen)
                 return
             }
-            consumerActive = try deviceIsRunning(mic.id)
+            consumerActive = try otherAppIsRecording(from: mic.id)
             if testing && consumerActive { testing = false; return }
             guard consumerActive || testing, let target = testing ? headphones : output.id else {
                 status = "Ready"
@@ -237,14 +259,20 @@ final class Controller {
             guard gen == generation else { return await Self.stop(p) }  // switched again while this one loaded
             pipeline = p
             p.setMix(mix)
+            lastHealthy = Date()
             isRunning = true
             status = testing ? "Testing" : "In use"
             while !Task.isCancelled {
                 try await Task.sleep(for: .seconds(3))
-                if !testing, let observedMic, try !deviceIsRunning(observedMic) {
+                if !testing, let observedMic, try !otherAppIsRecording(from: observedMic) {
                     restart()
                     return
                 }
+                guard await Self.onDevices(p) else {
+                    recover("CleanMyMic lost its microphone or output.", gen)
+                    return
+                }
+                lastHealthy = Date()
                 if !playbackWatch.advanced(to: p.samplesDelivered) {
                     recover("Audio stopped reaching the selected output.", gen)
                     return
@@ -264,6 +292,9 @@ final class Controller {
         try p.start()
         return p
     }
+
+    @concurrent
+    private nonisolated static func onDevices(_ p: Pipeline) async -> Bool { p.onIntendedDevices }
 
     private var playbackWatch = PlaybackWatch(recovering: false)
 
