@@ -8,6 +8,20 @@
 import AVFoundation
 import ObjCTry
 
+nonisolated struct PlaybackWatch {
+    private var lastSamples = 0
+    private(set) var canRestart: Bool
+
+    init(recovering: Bool) { canRestart = !recovering }
+
+    mutating func advanced(to samples: Int) -> Bool {
+        guard samples != lastSamples else { return false }
+        lastSamples = samples
+        canRestart = true
+        return true
+    }
+}
+
 nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio threads: mutable state is behind `lock`
     private let mic = AVAudioEngine(), out = AVAudioEngine()
     private let mono = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
@@ -16,6 +30,8 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
     private let enhancer: Enhancer  // the worker thread's alone once running
     private let lock = NSLock()
     private var inFifo: [Float] = [], outFifo: [Float] = [], mix: Float, running = true, busy = 0.0, frames = 0
+    private var delivered = 0
+    var samplesDelivered: Int { lock.withLock { delivered } }
     private let wake = DispatchSemaphore(value: 0)
     private let rewiring = DispatchQueue(label: "CleanMyMic.rewire")  // device changes, off AVAudioEngine's threads
     private var observers: [NSObjectProtocol] = []
@@ -114,8 +130,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
             try retrying(6) { try wire(mic: isMic) }
         } catch {
             if lock.withLock({ running }) {
-                onError("Lost the \(isMic ? "mic" : "output") when it changed format (\(error.localizedDescription))."
-                        + " Quit and reopen CleanMyMic.")
+                onError("Lost the \(isMic ? "mic" : "output") when it changed format (\(error.localizedDescription)).")
             }
         }
     }
@@ -162,6 +177,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
         lock.withLock {
             let n = min(count, outFifo.count)
             for i in 0..<count { out[i] = i < n ? outFifo[i] : 0 }
+            delivered += n  // silent audio counts, starvation padding does not
             outFifo.removeFirst(n)
         }
     }

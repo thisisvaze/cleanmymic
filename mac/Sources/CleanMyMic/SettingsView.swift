@@ -38,6 +38,12 @@ struct SettingsView: View {
 
     @ViewBuilder private var cleanup: some View {
         Section {
+            Toggle("Use as the Mac’s default input", isOn: Binding(
+                get: { controller.systemRouting.enabled }, set: { controller.setUseSystemInput($0) }))
+        } footer: {
+            Text("Apps using the system default get CleanMyMic while cleanup is on. Choosing another input in Sound settings turns this option off.")
+        }
+        Section {
             LabeledContent("Strength") {
                 HStack {
                     Slider(value: $controller.strength, in: 0...1)

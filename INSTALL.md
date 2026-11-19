@@ -52,12 +52,12 @@ The driver build downloads pinned BlackHole source. Installation asks for an adm
 ## First use
 
 1. Open CleanMyMic. **Using** shows the physical microphone chosen automatically. Click it to select MacBook, AirPods, or another mic yourself.
-2. In Meet, Zoom, or another call app, select **CleanMyMic** as the microphone. Keep that selection whether CleanMyMic is switched on or off. CleanMyMic manages **macOS Sound → Input** automatically.
+2. In Meet, Zoom, or another call app, select **CleanMyMic** as the microphone. Keep that selection whether CleanMyMic is switched on or off. The public alpha also selects CleanMyMic in **macOS Sound → Input**. In builds with **Settings → Cleanup → Use as the Mac’s default input**, system-wide routing is optional and starts off. Turning cleanup off restores the previous input if CleanMyMic selected itself. Picking a different input in Sound settings takes priority.
 3. Allow microphone access when macOS asks, then use your call app's microphone test. **Ready** means no app is using the virtual microphone; **In use** means audio is flowing.
 
 The switch at the top right of the panel is the main control: **on** sends cleaned audio, **off** passes your original voice through; it does not mute or disconnect the microphone. **Settings…** at the bottom of the panel opens the Settings window, with cleanup strength and the model. **Mic check** plays your mic to your headphones so you can compare **Original** and **Cleaned** before a call; it does not change what calls get. Automatic follows the physical mic selected by macOS and falls back to an available mic if that device disconnects; a manual choice takes priority while available.
 
-When the last app stops using the virtual microphone, CleanMyMic releases your physical mic and returns to **Ready**. macOS shows its microphone indicator during capture, including when CleanMyMic is switched off. An app's mute button may leave its microphone open; end the call or quit CleanMyMic to release it. Quitting restores a physical macOS input, but apps explicitly using CleanMyMic must switch to a physical mic if you want to keep talking.
+When the last app stops using the virtual microphone, CleanMyMic releases your physical mic and returns to **Ready**. macOS shows its microphone indicator during capture, including when CleanMyMic is switched off. An app's mute button may leave its microphone open; end the call or quit CleanMyMic to release it. Quitting restores the previous system input if CleanMyMic selected itself. Apps explicitly using CleanMyMic need a physical mic selected to keep the call going after you quit.
 
 The app registers to open at login. You can manage that in **System Settings → General → Login Items**. Audio enhancement runs locally; it does not need a cloud account or API key.
 

@@ -1,3 +1,5 @@
+import CoreAudio
+import Foundation
 import Testing
 @testable import CleanMyMic
 
@@ -45,4 +47,76 @@ import Testing
     #expect(microphoneSource(["builtin", "headset", micUID], in: [virtual, builtIn, headset]) == builtIn.id)
     #expect(microphoneSource(["headset", "builtin", micUID], in: [virtual, builtIn]) == builtIn.id)
     #expect(microphoneSource([micUID], in: [virtual]) == nil)
+}
+
+@Test func systemRoutingRequiresOptInAndRespectsManualChoices() {
+    let mic = AudioDevice(id: 1, uid: micUID, name: "CleanMyMic", inputs: true, outputs: false)
+    let cable = AudioDevice(id: 2, uid: cableUID, name: "Cable", inputs: false, outputs: true)
+    let physical = AudioDevice(id: 3, uid: "usb", name: "USB mic", inputs: true, outputs: false)
+    let alternative = AudioDevice(id: 4, uid: "other", name: "Other input", inputs: true, outputs: false, isVirtual: true)
+    let devices = [mic, cable, physical, alternative]
+    func change(_ current: AudioDevice?, _ saved: String?, enabled: Bool, claim: Bool = false) -> SystemInputChange {
+        .decide(current: current, devices: devices, previousUID: saved, enabled: enabled, allowClaim: claim)
+    }
+    #expect(change(physical, nil, enabled: false, claim: true) == .none)
+    #expect(change(physical, nil, enabled: true) == .none)
+    #expect(change(physical, nil, enabled: true, claim: true) == .claim(mic.id, previousUID: "usb"))
+    #expect(change(mic, "usb", enabled: true) == .none)
+    #expect(change(mic, "usb", enabled: false) == .restore(3))
+    #expect(change(mic, "other", enabled: false) == .restore(4))
+    #expect(change(mic, "disconnected", enabled: false) == .restore(3))
+    #expect(change(mic, nil, enabled: false) == .none)
+    #expect(change(alternative, "usb", enabled: true, claim: true) == .releaseOwnership)
+    #expect(change(nil, "usb", enabled: false) == .none)
+}
+
+@Test func stalledPlaybackRetriesOnceUntilSamplesFlowAgain() {
+    var watch = PlaybackWatch(recovering: false)
+    let firstInterval = watch.advanced(to: 0)
+    #expect(!firstInterval && watch.canRestart)
+    watch = PlaybackWatch(recovering: true)
+    let afterRestart = watch.advanced(to: 0)
+    #expect(!afterRestart && !watch.canRestart)
+    let delivered = watch.advanced(to: 480)  // queued silence counts as delivered audio
+    #expect(delivered && watch.canRestart)
+    let stalled = !watch.advanced(to: 480)
+    #expect(stalled)
+}
+
+@MainActor @Test func delayedSystemChangesRespectOffManualOverrideAndRelaunch() {
+    let suite = "dev.vaze.CleanMyMic.tests." + UUID().uuidString
+    let prefs = UserDefaults(suiteName: suite)!
+    defer { prefs.removePersistentDomain(forName: suite) }
+    let mic = AudioDevice(id: 1, uid: micUID, name: "CleanMyMic", inputs: true, outputs: false)
+    let cable = AudioDevice(id: 2, uid: cableUID, name: "Cable", inputs: false, outputs: true)
+    let usb = AudioDevice(id: 3, uid: "usb", name: "USB microphone", inputs: true, outputs: false)
+    let headset = AudioDevice(id: 4, uid: "headset", name: "Headset", inputs: true, outputs: false)
+    var current = usb.id
+    var writes: [AudioDeviceID] = []
+    func launch() -> SystemInputRouting {
+        SystemInputRouting(defaults: prefs, devices: { [mic, cable, usb, headset] },
+                           current: { current }, select: { writes.append($0) })
+    }
+    var router = launch()
+    router.update(cleanupOn: true, allowClaim: true)
+    #expect(writes.isEmpty)
+    router.setEnabled(true, cleanupOn: true)
+    router.update(cleanupOn: false)  // off before Core Audio confirms the claim
+    #expect(writes == [mic.id])
+    current = mic.id
+    router.update(cleanupOn: false)
+    #expect(writes == [mic.id, usb.id])
+    // The restore completes after a normal quit. The opt-in survives the next launch.
+    current = usb.id
+    router = launch()
+    router.update(cleanupOn: true, allowClaim: true)
+    #expect(router.enabled && writes == [mic.id, usb.id, mic.id])
+    current = mic.id
+    router.update(cleanupOn: true)
+    current = headset.id
+    router.update(cleanupOn: true)
+    #expect(!router.enabled)
+    #expect(prefs.string(forKey: "restoreInput") == nil)
+    router.update(cleanupOn: false, release: true)
+    #expect(writes == [mic.id, usb.id, mic.id])
 }

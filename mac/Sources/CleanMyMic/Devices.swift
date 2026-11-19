@@ -24,6 +24,28 @@ nonisolated func microphoneSource(_ uids: [String?], in devices: [AudioDevice]) 
     return (real.first { isBuiltIn($0.id) } ?? real.first)?.id
 }
 
+nonisolated enum SystemInputChange: Equatable {
+    case none, releaseOwnership
+    case claim(AudioDeviceID, previousUID: String), restore(AudioDeviceID)
+
+    static func decide(current: AudioDevice?, devices: [AudioDevice], previousUID: String?,
+                       enabled: Bool, allowClaim: Bool) -> Self {
+        guard let current else { return .none }  // Core Audio may be between devices
+        if let previousUID {
+            guard current.uid == micUID else { return .releaseOwnership }
+            guard !enabled else { return .none }
+            // Restore even a third-party virtual input if that was the user's choice.
+            let original = devices.first { $0.uid == previousUID && $0.inputs && $0.uid != micUID }
+            guard let target = original?.id ?? microphoneSource([], in: devices) else { return .none }
+            return .restore(target)
+        }
+        guard enabled, allowClaim, current.uid != micUID, !current.uid.isEmpty,
+              cleanMicOutput(in: devices) != nil,
+              let mic = devices.first(where: { $0.uid == micUID && $0.inputs }) else { return .none }
+        return .claim(mic.id, previousUID: current.uid)
+    }
+}
+
 nonisolated func cleanMicOutput(in devices: [AudioDevice]) -> AudioDevice? {
     guard devices.contains(where: { $0.uid == micUID && $0.inputs }) else { return nil }
     return devices.first { $0.uid == cableUID && $0.outputs }
@@ -114,7 +136,7 @@ nonisolated func setDefaultInput(_ id: AudioDeviceID) throws {
     var id = id
     let result = AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
                                UInt32(MemoryLayout<AudioDeviceID>.size), &id)
-    guard result == noErr, defaultDevice(input: true) == id else { throw AudioError.defaultInput }
+    guard result == noErr else { throw AudioError.defaultInput }
 }
 
 /// Points an AVAudioEngine input or output node (an AUHAL unit) at a device; before the engine starts.
@@ -131,7 +153,7 @@ nonisolated enum AudioError: Error, CustomStringConvertible {
         switch self {
         case .device(let s): "can't use that device (Core Audio error \(s))"
         case .activity(let s): "Unable to monitor microphone use (Core Audio error \(s))."
-        case .defaultInput: "Choose CleanMyMic in System Settings > Sound > Input to finish setup."
+        case .defaultInput: "Could not change the Mac’s input. Check Sound settings."
         case .noInput: "that mic gives no audio"
         case .noModel(let n): "the \(n) model is missing from the app"
         }

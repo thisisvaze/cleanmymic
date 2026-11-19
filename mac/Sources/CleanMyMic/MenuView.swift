@@ -28,6 +28,9 @@ struct MenuView: View {
             }
             .padding(12)
 
+            if let error = controller.systemRouting.error {
+                Text(error).font(.caption).padding([.horizontal, .bottom], 12)
+            }
             if stateLabel == "Needs attention" {
                 Text(controller.status)
                     .font(.caption)
