@@ -11,12 +11,26 @@ struct MenuView: View {
         return ["Starting…", "Ready"].contains(controller.status) ? controller.status : "Needs attention"
     }
 
+    private var subtitle: String {
+        if controller.noiseRemoval { return stateLabel }
+        if controller.isRunning { return "Off · Passing original mic through" }
+        return stateLabel == "Ready" ? "Off" : "Off · \(stateLabel)"
+    }
+
+    private var micCaption: String {
+        if controller.preferredMissing {
+            return "Using \(controller.microphoneName) until it reconnects."
+        }
+        let target = controller.isSystemInput ? "Active as Mac’s default input." : "Choose CleanMyMic in your call app."
+        return controller.inputUID.isEmpty ? "Using \(controller.microphoneName) · \(target)" : target
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CleanMyMic").font(.headline)
-                    Text(controller.noiseRemoval ? stateLabel : "Off · \(stateLabel)")
+                    Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -24,10 +38,13 @@ struct MenuView: View {
                 Toggle("CleanMyMic", isOn: $controller.noiseRemoval)  // the main switch: what calls get
                     .labelsHidden()
                     .toggleStyle(.switch)
-                    .help("Off sends your original voice, uncleaned, and ends Mic check")
+                    .help("Off switches Mac Sound away from CleanMyMic and passes original audio to apps using it")
             }
             .padding(12)
 
+            if let error = controller.systemRouting.error {
+                Text(error).font(.caption).padding([.horizontal, .bottom], 12)
+            }
             if stateLabel == "Needs attention" {
                 Text(controller.status)
                     .font(.caption)
@@ -47,8 +64,7 @@ struct MenuView: View {
                         ForEach(controller.microphones) { Text($0.name).tag($0.uid) }
                     }
                     .help("Using \(controller.microphoneName)")
-                    Text(controller.preferredMissing ? "Using \(controller.microphoneName) until it reconnects."
-                         : "Choose CleanMyMic as the microphone in your call app.")
+                    Text(micCaption)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

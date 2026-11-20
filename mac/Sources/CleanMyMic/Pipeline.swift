@@ -8,14 +8,31 @@
 import AVFoundation
 import ObjCTry
 
+nonisolated struct PlaybackWatch {
+    private var lastSamples = 0
+    private(set) var canRestart: Bool
+
+    init(recovering: Bool) { canRestart = !recovering }
+
+    mutating func advanced(to samples: Int) -> Bool {
+        guard samples != lastSamples else { return false }
+        lastSamples = samples
+        canRestart = true
+        return true
+    }
+}
+
 nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio threads: mutable state is behind `lock`
     private let mic = AVAudioEngine(), out = AVAudioEngine()
+    private let input: AudioDeviceID, output: AudioDeviceID  // where each engine belongs; set again on every rewire
     private let mono = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
     private var sink: AVAudioSinkNode!, source: AVAudioSourceNode!
     private var format: AVAudioFormat?, converter: AVAudioConverter?  // the mic's; set only while `mic` is stopped
     private let enhancer: Enhancer  // the worker thread's alone once running
     private let lock = NSLock()
     private var inFifo: [Float] = [], outFifo: [Float] = [], mix: Float, running = true, busy = 0.0, frames = 0
+    private var delivered = 0
+    var samplesDelivered: Int { lock.withLock { delivered } }
     private let wake = DispatchSemaphore(value: 0)
     private let rewiring = DispatchQueue(label: "CleanMyMic.rewire")  // device changes, off AVAudioEngine's threads
     private var observers: [NSObjectProtocol] = []
@@ -29,6 +46,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
         let enhancer = try Enhancer(model)
         enhancer.mix = mix
         (self.enhancer, self.mix, self.onError) = (enhancer, mix, onError)
+        (self.input, self.output) = (input, output)
         sink = AVAudioSinkNode { [unowned self] _, count, list in
             receive(list, count)
             return noErr
@@ -82,6 +100,14 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
 
     func setMix(_ m: Float) { lock.withLock { mix = m } }
 
+    /// False once an engine has drifted to another device. Seen live: both fell back to the system defaults, so the
+    /// app cleaned its own virtual mic and played into the headphones. Waits its turn behind any rewiring.
+    var onIntendedDevices: Bool {
+        rewiring.sync {
+            mic.inputNode.audioUnit.flatMap(currentDevice) == input && out.outputNode.audioUnit.flatMap(currentDevice) == output
+        }
+    }
+
     /// Average model time per 10 ms frame, in ms.
     var msPerFrame: Double { lock.withLock { frames > 0 ? busy / Double(frames) * 1000 : 0 } }
     var framesDone: Int { lock.withLock { frames } }
@@ -90,6 +116,10 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
     private func wire(mic isMic: Bool) throws {
         let engine = isMic ? mic : out
         engine.stop()
+        // An engine that lost its device carries on with the system default unless told again. A device that is
+        // gone fails here, and the controller starts over with whatever is connected now.
+        guard let unit = isMic ? mic.inputNode.audioUnit : out.outputNode.audioUnit else { throw AudioError.noInput }
+        try setDevice(unit, isMic ? input : output)
         if isMic {
             let f = mic.inputNode.inputFormat(forBus: 0)  // the device's format now; outputFormat can be stale after a change
             guard f.sampleRate > 0, f.channelCount > 0 else { throw AudioError.noInput }
@@ -114,8 +144,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
             try retrying(6) { try wire(mic: isMic) }
         } catch {
             if lock.withLock({ running }) {
-                onError("Lost the \(isMic ? "mic" : "output") when it changed format (\(error.localizedDescription))."
-                        + " Quit and reopen CleanMyMic.")
+                onError("Lost the \(isMic ? "mic" : "output") when it changed format (\(error.localizedDescription)).")
             }
         }
     }
@@ -162,6 +191,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
         lock.withLock {
             let n = min(count, outFifo.count)
             for i in 0..<count { out[i] = i < n ? outFifo[i] : 0 }
+            delivered += n  // silent audio counts, starvation padding does not
             outFifo.removeFirst(n)
         }
     }

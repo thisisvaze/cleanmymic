@@ -17,9 +17,13 @@ struct SettingsView: View {
         }
     }
 
+    private var visiblePanes: [Pane] {
+        controller.models.count > 1 ? Pane.allCases : [.cleanup, .about]
+    }
+
     var body: some View {
         NavigationSplitView {
-            List(Pane.allCases, selection: $pane) { Label($0.rawValue, systemImage: $0.icon) }
+            List(visiblePanes, selection: $pane) { Label($0.rawValue, systemImage: $0.icon) }
                 .navigationSplitViewColumnWidth(170)
                 .toolbar(removing: .sidebarToggle)
         } detail: {
@@ -37,6 +41,12 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var cleanup: some View {
+        Section {
+            Toggle("Use as the Mac’s default input", isOn: Binding(
+                get: { controller.systemRouting.enabled }, set: { controller.setUseSystemInput($0) }))
+        } footer: {
+            Text("Apps using the system default get CleanMyMic while cleanup is on. Choosing another input in Sound settings turns this option off.")
+        }
         Section {
             LabeledContent("Strength") {
                 HStack {
@@ -70,6 +80,7 @@ struct SettingsView: View {
         Section {
             LabeledContent("Version",
                            value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
+            LabeledContent("Model", value: modelDisplayName(controller.model))
             LabeledContent("Processing", value: "On-device, no account or cloud")
             Link("CleanMyMic on GitHub", destination: URL(string: "https://github.com/thisisvaze/cleanmymic")!)
         }
