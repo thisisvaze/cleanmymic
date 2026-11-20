@@ -61,3 +61,49 @@ import Testing
     polish.process(&after)
     #expect(after.allSatisfy { $0 == 0 })
 }
+
+@Test func inputPreampLiftsQuietMicsForModelAndRestoresTransparentOutput() {
+    var preamp = InputPreamp(enabled: true, look: 2)
+    // -60 dBFS quiet far-field mic speech (0.0014 peak / 0.001 RMS)
+    var scaledPeak: Float = 0
+    var restoredRMS = 0.0
+    var inputRMS = 0.0
+    var queue = [[Float]](repeating: [Float](repeating: 0, count: 480), count: 2)
+    for hopIdx in 0..<250 {  // 2.5 s
+        let frame = (0..<480).map { j in
+            let n = hopIdx * 480 + j
+            return Float(0.0014 * sin(2 * Double.pi * 300 * Double(n) / 48_000))
+        }
+        let (scaled, outGain) = preamp.scaleInput(frame)
+        queue.append(scaled)
+        var delayed = queue.removeFirst()
+        preamp.restoreOutput(&delayed, outGain: outGain)
+        if hopIdx >= 200 {
+            scaledPeak = max(scaledPeak, scaled.map(abs).max() ?? 0)
+            restoredRMS += delayed.reduce(0.0) { $0 + Double($1 * $1) }
+            inputRMS += frame.reduce(0.0) { $0 + Double($1 * $1) }
+        }
+    }
+    // Model sees > 15 dB boosted signal (well inside DFN3's operating range), while output returns within 0.5 dB of original
+    #expect(scaledPeak > 0.02)
+    let ratioDB = abs(10 * log10(restoredRMS / max(inputRMS, 1e-12)))
+    #expect(ratioDB < 0.5)
+}
+
+@Test func inputPreampLeavesNormalMicsAndDigitalSilenceUntouched() {
+    var preamp = InputPreamp(enabled: true, look: 2)
+    let silence = [Float](repeating: 0, count: 480)
+    let (sOut, sGain) = preamp.scaleInput(silence)
+    #expect(sGain == 1.0 && sOut.allSatisfy { $0 == 0 })
+
+    // Normal -20 dBFS speech stays at 1.0x gain (no unnecessary pumping)
+    for hopIdx in 0..<100 {
+        let frame = (0..<480).map { j in
+            let n = hopIdx * 480 + j
+            return Float(0.14 * sin(2 * Double.pi * 400 * Double(n) / 48_000))
+        }
+        let (scaled, outGain) = preamp.scaleInput(frame)
+        #expect(outGain == 1.0)
+        #expect(scaled == frame)
+    }
+}

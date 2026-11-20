@@ -12,6 +12,7 @@ nonisolated final class Enhancer {
     let window: [Float], c: Float  // c: the model's spectrum exponent (1: plain spectrum)
     let look: Int  // frames the model looks ahead: its output lags by 1 + look hops
     var mix: Float = 1  // strength: 1 = the model's output, 0 = the raw input, time-aligned with it
+    var preamp: InputPreamp  // Pipeline turns this on so quiet mics (-60 dBFS) never starve DFN3's running norms
     var polish = StudioPolish(enabled: false, limitPeaks: false)  // Pipeline turns peak limiting + optional polish on
     private var wasBypassed = false
     var buf = [Float](repeating: 0, count: win), tail = [Float](repeating: 0, count: hop), dry: [Float]
@@ -29,7 +30,8 @@ nonisolated final class Enhancer {
         let meta = model.modelDescription.metadata[.creatorDefinedKey] as? [String: String] ?? [:]
         c = Float(meta["compress"] ?? "0.3") ?? 0.3
         look = Int(meta["look"] ?? "0") ?? 0
-        dry = [Float](repeating: 0, count: hop * look)
+        preamp = InputPreamp(enabled: false, look: look)
+        dry = [Float](repeating: 0, count: hop * (1 + look))
         window = meta["window"] == "vorbis"  // libDF's: sin(pi/2 sin^2(pi (n + 0.5) / N))
             ? (0..<win).map { Float(sin(0.5 * Double.pi * pow(sin(Double.pi * (Double($0) + 0.5) / Double(win)), 2))) }
             : (0..<win).map { sqrt(0.5 - 0.5 * cos(2 * Float.pi * Float($0) / Float(win))) }
@@ -64,18 +66,25 @@ nonisolated final class Enhancer {
 
     /// 480 samples in, 480 out.
     func process(_ input: [Float]) throws -> [Float] {
-        buf.removeFirst(hop)
-        buf.append(contentsOf: input)
-        dry.append(contentsOf: buf[..<hop])  // the input that lines up with this output, `look` hops back
+        dry.append(contentsOf: input)  // unscaled raw input delayed by (1 + look) hops to match the model's output
         let raw = Array(dry.prefix(hop))
         dry.removeFirst(hop)
-        if mix == 0 { wasBypassed = true; return raw }
+        if mix == 0 {
+            buf.removeFirst(hop)
+            buf.append(contentsOf: input)
+            wasBypassed = true
+            return raw
+        }
         if wasBypassed {  // don't replay stale overlap or recurrent state when cleanup resumes
             for a in state.values { for i in 0..<a.count { a[i] = 0 } }
             tail = [Float](repeating: 0, count: hop)
+            preamp.reset()
             polish.reset()
             wasBypassed = false
         }
+        let (scaledInput, outGain) = preamp.scaleInput(input)
+        buf.removeFirst(hop)
+        buf.append(contentsOf: scaledInput)
         let (re, im) = rfft(zip(buf, window).map(*))
         let x = try MLMultiArray(shape: [1, 1, NSNumber(value: 2 * bins)], dataType: .float32)
         let xp = x.dataPointer.assumingMemoryBound(to: Float.self)
@@ -100,6 +109,7 @@ nonisolated final class Enhancer {
         let frame = zip(irfft(yr, yi), window).map(*)
         defer { tail = Array(frame[hop...]) }
         var wet = (0..<hop).map { tail[$0] + frame[$0] }
+        preamp.restoreOutput(&wet, outGain: outGain)
         polish.process(&wet)
         return mix == 1 ? wet : (0..<hop).map { mix * wet[$0] + (1 - mix) * raw[$0] }
     }

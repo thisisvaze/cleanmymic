@@ -28,6 +28,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
          onError: @escaping @Sendable (String) -> Void) throws {
         let enhancer = try Enhancer(model)
         enhancer.mix = mix
+        enhancer.preamp.enabled = true
         enhancer.polish = StudioPolish(enabled: studioPolish, limitPeaks: true)
         (self.enhancer, self.mix, self.studioPolish, self.onError) = (enhancer, mix, studioPolish, onError)
         sink = AVAudioSinkNode { [unowned self] _, count, list in

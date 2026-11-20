@@ -1,9 +1,86 @@
-// Lightweight broadcast finishing chain after the neural model (48 kHz mono, zero extra latency):
-// 1. 75 Hz Butterworth high-pass (removes desk thumps, plosives, DC)
-// 2. Subtle studio vocal EQ (gentle 280 Hz de-mud, 3.2 kHz presence, 10 kHz air) when `studioPolish` is on
-// 3. Speech-gated soft-knee leveler/compressor (never boosts silence/pauses) when `studioPolish` is on
-// 4. Always-on -1 dBTP peak safety limiter (prevents Core ML overshoots from clipping Core Audio)
+// Lightweight broadcast DSP around the neural model (48 kHz mono, zero extra latency):
+// - InputPreamp (pre-model, transparently undone post-model): smoothly lifts very quiet mics (-65..-35 dBFS)
+//   into the neural model's -24 dBFS sweet spot so DFN3's running norms never starve and duck quiet speech.
+// - StudioPolish (post-model):
+//   1. 75 Hz Butterworth high-pass (removes desk thumps, plosives, DC)
+//   2. Subtle studio vocal EQ (gentle 280 Hz de-mud, 3.2 kHz presence, 10 kHz air) when `enabled` is on
+//   3. Speech-gated soft-knee leveler/compressor (never boosts silence/pauses) when `enabled` is on
+//   4. Peak safety limiter (-1 dBTP) when `limitPeaks` is on (prevents Core ML overshoots clipping Core Audio)
 import Foundation
+
+/// Transparent pre-model mic preamp that prevents quiet-mic voice dropouts (e.g. far-field rooms or leaning back).
+/// Scales input frames up toward -24 dBFS for the neural model, then divides output frames by the time-aligned
+/// ramped gain (`look` hops delayed) so perceived loudness stays unchanged without pumping.
+nonisolated struct InputPreamp {
+    var enabled: Bool
+    private let look: Int
+    private var env = 0.05  // start neutral (-26 dBFS): normal mics stay at 1.0x immediately
+    private var gain = 1.0
+    private var prevOutGain = 1.0
+    private var gainHistory: [Double]
+
+    // Per-10ms-hop constants at 48 kHz (hop = 480)
+    private let envAttack = 1.0 - exp(-480.0 / (0.02 * 48_000))   // 20 ms fast attack on loud speech
+    private let envRelease = 1.0 - exp(-480.0 / (0.50 * 48_000))  // 0.5 s track down on quiet mics
+    private let gainDown = 1.0 - exp(-480.0 / (0.04 * 48_000))    // 40 ms back-off if loudness rises
+    private let gainUp = 1.0 - exp(-480.0 / (0.35 * 48_000))      // 350 ms smooth rise (slower than DFN3 norm)
+    private let maxGain = 40.0                                     // up to +32 dB for -60 dBFS far-field mics
+
+    init(enabled: Bool = false, look: Int = 2) {
+        self.enabled = enabled
+        self.look = max(0, look)
+        self.gainHistory = [Double](repeating: 1.0, count: self.look + 1)
+    }
+
+    mutating func reset() {
+        env = 0.05
+        gain = 1.0
+        prevOutGain = 1.0
+        gainHistory = [Double](repeating: 1.0, count: look + 1)
+    }
+
+    /// Scales a 480-sample input frame for the neural model and returns the time-aligned gain to undo on output.
+    mutating func scaleInput(_ input: [Float]) -> (scaled: [Float], outGain: Double) {
+        guard enabled else { return (input, 1.0) }
+        var sumSq = 0.0
+        var peak = 0.0
+        for s in input {
+            let v = Double(s)
+            sumSq += v * v
+            let av = abs(v)
+            if av > peak { peak = av }
+        }
+        let rms = sqrt(sumSq / Double(max(1, input.count)))
+        if rms > 1e-5 {  // ignore digital silence
+            let alpha = rms > env ? envAttack : envRelease
+            env += alpha * (rms - env)
+            let maxSafe = 0.85 / max(peak, 1e-6)
+            // Deadzone above -27 dBFS (0.045): normal/loud mics stay untouched at 1.0x
+            let desired = env < 0.045 ? (0.063 / max(env, 1e-4)) : 1.0
+            let target = min(max(desired, 1.0), min(maxGain, maxSafe))
+            let gAlpha = target < gain ? gainDown : gainUp
+            gain = min(gain + gAlpha * (target - gain), maxSafe)
+        }
+        gainHistory.append(gain)
+        let outGain = gainHistory.removeFirst()
+        if gain == 1.0 { return (input, outGain) }
+        let g = Float(gain)
+        return (input.map { $0 * g }, outGain)
+    }
+
+    /// Transparently undoes the time-aligned pre-gain on the 480-sample model output with click-free linear ramp.
+    mutating func restoreOutput(_ output: inout [Float], outGain: Double) {
+        guard enabled else { return }
+        if prevOutGain == 1.0 && outGain == 1.0 { return }
+        let n = output.count
+        let denom = Double(max(1, n - 1))
+        for i in 0..<n {
+            let g = prevOutGain + (outGain - prevOutGain) * (Double(i) / denom)
+            output[i] = Float(Double(output[i]) / max(g, 1e-6))
+        }
+        prevOutGain = outGain
+    }
+}
 
 nonisolated struct Biquad {
     private let b0: Double, b1: Double, b2: Double, a1: Double, a2: Double
