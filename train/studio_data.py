@@ -7,6 +7,7 @@ Key differences from CleanMyMic's earlier suppressor pipeline:
 4. Measured microphone impulse responses (Surrey Mic IRs, CC BY 4.0) + synthetic Bluetooth/VoIP/suppressor artifacts.
 5. Real recorded room pairs (RealMAN ma_speech/dp_speech, CC BY 4.0) mixed into training batches.
 """
+
 import math
 from pathlib import Path
 
@@ -23,8 +24,8 @@ EVENT_LEN = 4  # s: clips <= 4 s used as transient events
 
 # Strictly permissive / share-alike 48 kHz clean speech pools (no noncommercial EARS/Expresso)
 STUDIO_CLEAN = {
-    "packed5/src/vctk1": 0.45,     # 41.6 h, 48 kHz DPA studio mic (CC BY 4.0)
-    "packed5/src/slr83": 0.30,     # 31.3 h, 48 kHz UK/Irish accents, -79 dB floor (CC BY-SA 4.0)
+    "packed5/src/vctk1": 0.45,  # 41.6 h, 48 kHz DPA studio mic (CC BY 4.0)
+    "packed5/src/slr83": 0.30,  # 31.3 h, 48 kHz UK/Irish accents, -79 dB floor (CC BY-SA 4.0)
     "packed5/src/aishell3": 0.20,  # 85.6 h, 44.1->48 kHz studio Mandarin (Apache 2.0)
     "packed5/src/vocalset": 0.05,  # 8.8 h, 44.1->48 kHz vocals/breaths (CC BY 4.0)
 }
@@ -43,15 +44,15 @@ STUDIO_DEHISS = {
 
 # Strictly permissive / share-alike noise beds & events (427+ h already packed)
 STUDIO_BEDS = {
-    "packed5/src/realman": 0.20,        # 57.3 h real cafes, malls, streets, offices (CC BY 4.0)
-    "packed5/src/cochlscene": 0.18,     # 65.6 h cafes, restaurants, kitchens (CC BY-SA 3.0)
-    "packed6/src/cochl_indoor": 0.12,   # 49.0 h indoor scenes (CC BY-SA 3.0)
+    "packed5/src/realman": 0.20,  # 57.3 h real cafes, malls, streets, offices (CC BY 4.0)
+    "packed5/src/cochlscene": 0.18,  # 65.6 h cafes, restaurants, kitchens (CC BY-SA 3.0)
+    "packed6/src/cochl_indoor": 0.12,  # 49.0 h indoor scenes (CC BY-SA 3.0)
     "packed6/src/cochl_outdoor": 0.10,  # 47.9 h outdoor scenes (CC BY-SA 3.0)
     "packed6/src/cochl_transit": 0.10,  # 48.9 h transit scenes (CC BY-SA 3.0)
-    "packed5/src/fsd50k": 0.12,         # 79.8 h CC0/CC BY filtered non-vocal
-    "packed5/src/sonyc": 0.09,          # 51.4 h urban streets (CC BY 4.0)
-    "packed5/src/dns": 0.07,            # 27.0 h DNS Freesound CC0 (breath/spit removed)
-    "packed5/src/demand": 0.02,         # 0.8 h real room/cafe ambiences (CC BY-SA 3.0)
+    "packed5/src/fsd50k": 0.12,  # 79.8 h CC0/CC BY filtered non-vocal
+    "packed5/src/sonyc": 0.09,  # 51.4 h urban streets (CC BY 4.0)
+    "packed5/src/dns": 0.07,  # 27.0 h DNS Freesound CC0 (breath/spit removed)
+    "packed5/src/demand": 0.02,  # 0.8 h real room/cafe ambiences (CC BY-SA 3.0)
 }
 STUDIO_EVENTS = {
     "packed5/src/fsd50k": 0.65,
@@ -62,14 +63,22 @@ STUDIO_EVENTS = {
 class Pool:
     """Packed int16 audio pool (memmap-friendly) matching packed5/packed6 format."""
 
-    def __init__(self, path, device, dehissed=False, memmap=True, split=None, max_len=None):
+    def __init__(
+        self, path, device, dehissed=False, memmap=True, split=None, max_len=None
+    ):
         mode = "c" if memmap else None
         self.dev, store = device, "cpu" if memmap else device
         self.xs, src, start, length, voice, weight = [], [], [], [], [], []
-        for k, (p, share) in enumerate((path if isinstance(path, dict) else {path: 1.0}).items()):
+        for k, (p, share) in enumerate(
+            (path if isinstance(path, dict) else {path: 1.0}).items()
+        ):
             p_str = str(p)
             use_dh = dehissed is True or (dehissed and p in dehissed)
-            npy_path = f"{p_str}_dehissed.npy" if use_dh and Path(f"{p_str}_dehissed.npy").exists() else f"{p_str}.npy"
+            npy_path = (
+                f"{p_str}_dehissed.npy"
+                if use_dh and Path(f"{p_str}_dehissed.npy").exists()
+                else f"{p_str}.npy"
+            )
             x, idx = np.load(npy_path, mmap_mode=mode), np.load(f"{p_str}_idx.npy")
             lens = idx[1:] - idx[:-1]
             keep = np.ones(len(lens), bool)
@@ -88,19 +97,29 @@ class Pool:
             voice.append(v[keep])
             weight.append(lens[keep] / max(lens[keep].sum(), 1) * share)
         self.src, self.start, self.len, self.voice = (
-            torch.from_numpy(np.concatenate(a)).to(store) for a in (src, start, length, voice)
+            torch.from_numpy(np.concatenate(a)).to(store)
+            for a in (src, start, length, voice)
         )
         self.w = torch.from_numpy(np.concatenate(weight)).float()
 
     def sample(self, n, seg, wrap=False, flags=False):
         c = torch.multinomial(self.w, n, replacement=True)
-        off = (torch.rand(n, device=self.start.device) * (self.len[c] - seg).clamp(min=0)).long()
+        off = (
+            torch.rand(n, device=self.start.device) * (self.len[c] - seg).clamp(min=0)
+        ).long()
         out = torch.zeros(n, seg, dtype=torch.int16, device=self.start.device)
-        for i, (k, s, l, o) in enumerate(zip(self.src[c].tolist(), self.start[c].tolist(), self.len[c].tolist(), off.tolist())):
-            clip = self.xs[k][s + o:s + l]
+        for i, (k, s, l, o) in enumerate(
+            zip(
+                self.src[c].tolist(),
+                self.start[c].tolist(),
+                self.len[c].tolist(),
+                off.tolist(),
+            )
+        ):
+            clip = self.xs[k][s + o : s + l]
             if wrap and l < seg:
                 clip = clip.repeat(-(-seg // l))
-            out[i, :min(seg, len(clip))] = clip[:seg]
+            out[i, : min(seg, len(clip))] = clip[:seg]
         out = out.to(self.dev, non_blocking=True).float() / 32768.0
         return (out, self.voice[c].to(self.dev)) if flags else out
 
@@ -111,10 +130,12 @@ class Pool:
         for _ in range(slots):
             c = torch.multinomial(self.w, n, replacement=True)
             gaps = (torch.empty(n).uniform_(*gap) * SR).long().tolist()
-            for i, (k, s, l) in enumerate(zip(self.src[c].tolist(), self.start[c].tolist(), self.len[c].tolist())):
+            for i, (k, s, l) in enumerate(
+                zip(self.src[c].tolist(), self.start[c].tolist(), self.len[c].tolist())
+            ):
                 lo, hi = max(at[i], 0), min(at[i] + l, seg)
                 if lo < hi:
-                    out[i, lo:hi] = self.xs[k][s + lo - at[i]:s + hi - at[i]]
+                    out[i, lo:hi] = self.xs[k][s + lo - at[i] : s + hi - at[i]]
                 at[i] += l + gaps[i]
                 if hold and at[i] > hold[0][i]:
                     at[i] += hold[1][i]
@@ -123,7 +144,9 @@ class Pool:
 
 
 def random_eq_db(n, f, knots=10, std_db=4.5):
-    pos = ((f.clamp(min=50).log() - math.log(50)) / math.log(24000 / 50) * (knots - 1)).clamp(max=knots - 1)
+    pos = (
+        (f.clamp(min=50).log() - math.log(50)) / math.log(24000 / 50) * (knots - 1)
+    ).clamp(max=knots - 1)
     i0 = pos.floor().long().clamp(max=knots - 2)
     w = pos - i0
     g = torch.randn(n, knots, device=f.device) * std_db
@@ -132,19 +155,25 @@ def random_eq_db(n, f, knots=10, std_db=4.5):
 
 def highpass(f, fc=LOW_CUT):
     s, w = 2j * math.pi * f, 2 * math.pi * fc
-    return s ** 2 / (s ** 2 + math.sqrt(2) * w * s + w ** 2)
+    return s**2 / (s**2 + math.sqrt(2) * w * s + w**2)
 
 
 def by_distance(rirs):
-    drr = rirs[:, :SR // 400].pow(2).sum(1) / rirs[:, SR // 400:].pow(2).sum(1).clamp(min=1e-12)
+    drr = rirs[:, : SR // 400].pow(2).sum(1) / rirs[:, SR // 400 :].pow(2).sum(1).clamp(
+        min=1e-12
+    )
     order = drr.argsort(descending=True)
-    return order[:len(order) * 3 // 5], order[len(order) * 3 // 5:]
+    return order[: len(order) * 3 // 5], order[len(order) * 3 // 5 :]
 
 
 def active_rms(a, frame=SR // 50):
     e = a[:, : a.shape[1] // frame * frame].unflatten(1, (-1, frame)).pow(2).mean(2)
     act = e >= e.amax(1, keepdim=True) * 1e-4
-    return ((e * act).sum(1, keepdim=True) / act.sum(1, keepdim=True).clamp(min=1)).sqrt().clamp(min=1e-5)
+    return (
+        ((e * act).sum(1, keepdim=True) / act.sum(1, keepdim=True).clamp(min=1))
+        .sqrt()
+        .clamp(min=1e-5)
+    )
 
 
 def device_noise(n, L, f, level, dev):
@@ -153,14 +182,26 @@ def device_noise(n, L, f, level, dev):
     white = lambda: torch.fft.rfft(torch.randn(n, L, device=dev))
 
     def at_level(spec, db):
-        return spec / (spec.abs().pow(2).sum(1, keepdim=True) * 2 / L ** 2).sqrt().clamp(min=1e-12) * level * 10 ** (db / 20)
+        return (
+            spec
+            / (spec.abs().pow(2).sum(1, keepdim=True) * 2 / L**2)
+            .sqrt()
+            .clamp(min=1e-12)
+            * level
+            * 10 ** (db / 20)
+        )
 
     fr = f.clamp(min=1)
     slope = rand(4, 9) / 6.02
-    shape = (fr / 40) ** -slope / (1 + (30 / fr) ** 4) / (1 + (fr / rand(1000, 4000)) ** 4)
+    shape = (
+        (fr / 40) ** -slope / (1 + (30 / fr) ** 4) / (1 + (fr / rand(1000, 4000)) ** 4)
+    )
     rumble = at_level(white() * shape, -rand(10, 35)) * coin(0.5)
     t, tone_f = torch.arange(L, device=dev) / SR, rand(40, 400)
-    tones = sum(torch.sin(2 * math.pi * (k * tone_f * t + torch.rand(n, 1, device=dev))) / k for k in (1, 2, 3))
+    tones = sum(
+        torch.sin(2 * math.pi * (k * tone_f * t + torch.rand(n, 1, device=dev))) / k
+        for k in (1, 2, 3)
+    )
     rumble = rumble + at_level(torch.fft.rfft(tones), -rand(20, 40)) * coin(0.15)
     shape = (fr / 4000) ** (rand(-3, 3) / 6.02) / (1 + (2000 / fr) ** 4)
     hiss = at_level(white() * shape, -rand(40, 75)) * coin(0.6)
@@ -209,7 +250,9 @@ class RealPairPool:
             n = min(len(x), len(t))
             if n < SR:
                 continue
-            self.loaded.append((torch.from_numpy(x[:n].copy()), torch.from_numpy(t[:n].copy())))
+            self.loaded.append(
+                (torch.from_numpy(x[:n].copy()), torch.from_numpy(t[:n].copy()))
+            )
             if len(self.loaded) >= max_clips:
                 break
 
@@ -224,9 +267,9 @@ class RealPairPool:
             x, t = self.loaded[idx]
             if len(x) >= seg:
                 off = int(torch.randint(len(x) - seg + 1, ()))
-                xs[i], ts[i] = x[off:off + seg], t[off:off + seg]
+                xs[i], ts[i] = x[off : off + seg], t[off : off + seg]
             else:
-                xs[i, :len(x)], ts[i, :len(t)] = x, t
+                xs[i, : len(x)], ts[i, : len(t)] = x, t
         return xs.to(self.dev, non_blocking=True), ts.to(self.dev, non_blocking=True)
 
 
@@ -250,7 +293,7 @@ def _apply_spectral_artifacts(noisy, dev):
                         r = torch.linspace(1.0, 0.0, ramp, device=dev)
                         win[:ramp] = r
                         win[-ramp:] = r.flip(0)
-                    drop_mask[i, pos:pos + dlen] *= win
+                    drop_mask[i, pos : pos + dlen] *= win
     noisy = noisy * drop_mask
 
     # 2) Spectral quantization / upstream-suppressor bubble holes (18% of clips)
@@ -262,15 +305,41 @@ def _apply_spectral_artifacts(noisy, dev):
         mag = S.abs()
         m, nf, nt = sub.shape[0], S.shape[1], S.shape[2]
         grid = torch.rand(m, 1, max(1, nf // 12), max(1, nt // 4), device=dev)
-        holes = F.interpolate((grid > 0.12).float(), size=(nf, nt), mode="nearest")[:, 0]
+        holes = F.interpolate((grid > 0.12).float(), size=(nf, nt), mode="nearest")[
+            :, 0
+        ]
         holes[:, :30, :] = 1.0
         quant_on = torch.rand(m, 1, 1, device=dev) < 0.5
         thresh = mag.amax((1, 2), keepdim=True) * 0.015
-        S_mod = torch.where(quant_on & (mag < thresh), S * 0.15, S * (0.2 + 0.8 * holes))
+        S_mod = torch.where(
+            quant_on & (mag < thresh), S * 0.15, S * (0.2 + 0.8 * holes)
+        )
         noisy = noisy.clone()
         noisy[has_art] = torch.istft(S_mod, 960, 480, window=win, length=seg)
 
     return noisy
+
+
+def _wind_gusts(n, seg, level, dev):
+    """Procedural outdoor wind-on-mic buffeting: slow modulated 20-450 Hz gusts (walking/sitting along roads)."""
+    w = torch.randn(n, seg, device=dev)
+    f = torch.fft.rfftfreq(seg, 1 / SR, device=dev)
+    # Steep low-pass around 180-450 Hz with 1/f^1.5 rolloff (classic capsule turbulence)
+    fc = torch.empty(n, 1, device=dev).uniform_(180.0, 450.0)
+    shape = (1.0 / (1.0 + (f / fc) ** 3)) * (
+        1.0 / (1.0 + (22.0 / f.clamp(min=1.0)) ** 4)
+    )
+    gust = torch.fft.irfft(torch.fft.rfft(w) * shape, n=seg)
+    # Slow random amplitude modulation (0.5-3 Hz gust bursts)
+    m_pts = max(4, seg // (SR // 4))
+    env = torch.rand(n, 1, m_pts, device=dev).pow(
+        2.0
+    )  # spiky bursts with quieter troughs
+    env = F.interpolate(env, size=seg, mode="linear", align_corners=False)[:, 0]
+    gust = gust * env
+    g_rms = gust.pow(2).mean(1, keepdim=True).sqrt().clamp(min=1e-6)
+    snr = torch.empty(n, 1, device=dev).uniform_(-5.0, 18.0)
+    return gust / g_rms * level * 10 ** (-snr / 20.0)
 
 
 def make_studio_batch(
@@ -286,6 +355,8 @@ def make_studio_batch(
     hold=0.0,
     clean_prob=0.15,
     bandlim_prob=0.45,
+    noise_only_prob=0.0,
+    wind_prob=0.18,
     force_bandlim_hz=None,
 ):
     """Build (noisy, target) 48 kHz studio-restoration pairs [n, seg]."""
@@ -300,7 +371,9 @@ def make_studio_batch(
         quiet = torch.rand(n) < hold
         when = torch.empty(n).uniform_(*((3, 8) if long else (0.5, 3))) * SR
         spans = torch.empty(n).uniform_(*((8, 18) if long else (2, 5))) * SR * quiet
-    speech = clean.joined(n, seg, hold=(when.long().tolist(), spans.long().tolist()) if hold else None)
+    speech = clean.joined(
+        n, seg, hold=(when.long().tolist(), spans.long().tolist()) if hold else None
+    )
     speech = speech / active_rms(speech) * 10 ** (rand(-48, -14) / 20)
 
     # Room reverb on INPUT only; target stays 100% TIME-ALIGNED DRY ANECHOIC (70 Hz studio HPF)
@@ -319,7 +392,9 @@ def make_studio_batch(
         rir = all_rirs
     S = torch.fft.rfft(speech, n=L)
     in_room = coin(0.75)
-    rev = torch.where(in_room, torch.fft.irfft(S * torch.fft.rfft(rir, n=L), n=L)[:, :seg], speech)
+    rev = torch.where(
+        in_room, torch.fft.irfft(S * torch.fft.rfft(rir, n=L), n=L)[:, :seg], speech
+    )
     dry_hp = torch.fft.irfft(S * highpass(f, LOW_CUT), n=L)[:, :seg]
     # Gently clean pure-silence room hum (< -48 dB below target speech, smoothed over 40 ms) so VCTK's -43 dB
     # studio rumble doesn't teach the model to leave noise haze in pauses; breaths/consonants stay untouched.
@@ -329,7 +404,9 @@ def make_studio_batch(
     thr = active_rms(dry_hp) * 0.004  # -48 dB below active speech
     gate_f = (t_rms / (t_rms + thr)).pow(2)
     gate_f = F.avg_pool1d(gate_f[:, None], 5, 1, 2)[:, 0]  # smooth ~100 ms transitions
-    gate_s = F.interpolate(gate_f[:, None], size=seg, mode="linear", align_corners=False)[:, 0]
+    gate_s = F.interpolate(
+        gate_f[:, None], size=seg, mode="linear", align_corners=False
+    )[:, 0]
     dry_clean = dry_hp * (0.01 + 0.99 * gate_s)
     target = dry_clean * (active_rms(rev) / active_rms(dry_clean))
 
@@ -342,24 +419,40 @@ def make_studio_batch(
     if events is not None:
         for k in range(3):
             ev, ev_voiced = events.sample(n, seg, flags=True)
-            ev = ev.gather(1, (torch.arange(seg, device=dev) - torch.randint(seg, (n, 1), device=dev)) % seg)
+            ev = ev.gather(
+                1,
+                (torch.arange(seg, device=dev) - torch.randint(seg, (n, 1), device=dev))
+                % seg,
+            )
             ev_snr = torch.where(ev_voiced[:, None], rand(5, 25), rand(-5, 25))
-            nz = nz + ev / active_rms(ev) * level * 10 ** (-ev_snr / 20) * coin(0.55 - 0.18 * k)
+            nz = nz + ev / active_rms(ev) * level * 10 ** (-ev_snr / 20) * coin(
+                0.55 - 0.18 * k
+            )
 
     k_bab = 6
-    voices = clean.sample(n * k_bab, seg).view(n, k_bab, seg) * (torch.rand(n, k_bab, 1, device=dev) < rand(0.3, 1.0)[..., None])
+    voices = clean.sample(n * k_bab, seg).view(n, k_bab, seg) * (
+        torch.rand(n, k_bab, 1, device=dev) < rand(0.3, 1.0)[..., None]
+    )
     rk_bab = rirs[torch.randint(len(rirs), (n, k_bab), device=dev)]
-    bab = torch.fft.irfft((torch.fft.rfft(voices, n=L) * torch.fft.rfft(rk_bab, n=L)).sum(1), n=L)[:, :seg]
+    bab = torch.fft.irfft(
+        (torch.fft.rfft(voices, n=L) * torch.fft.rfft(rk_bab, n=L)).sum(1), n=L
+    )[:, :seg]
     nz = nz + bab / rms(bab) * level * 10 ** (-rand(10, 26) / 20) * coin(0.30)
 
     far_idx = rooms[1] if rooms is not None else torch.arange(len(rirs), device=dev)
     for k in range(2):
         other = clean.joined(n, seg)
         rk = rirs[far_idx[torch.randint(len(far_idx), (n,), device=dev)]]
-        other_rev = torch.fft.irfft(torch.fft.rfft(other, n=L) * torch.fft.rfft(rk, n=L), n=L)[:, :seg]
+        other_rev = torch.fft.irfft(
+            torch.fft.rfft(other, n=L) * torch.fft.rfft(rk, n=L), n=L
+        )[:, :seg]
         on = has_other if k == 0 else (has_other & coin(0.45))
         under = rand(5, 28)
         nz = nz + other_rev / active_rms(other_rev) * level * 10 ** (-under / 20) * on
+
+    # Outdoor wind-on-mic buffeting gusts (walking/sitting along roads)
+    if wind_prob > 0 and force_bandlim_hz is None:
+        nz = nz + _wind_gusts(n, seg, level, dev) * coin(wind_prob)
 
     # Device noise floor + measured Surrey Mic IR + random mic coloration + Bluetooth/VoIP band-limiting (INPUT ONLY!)
     rumble, hiss = device_noise(n, L, f, level, dev)
@@ -380,18 +473,42 @@ def make_studio_batch(
         cutoff = torch.full((n, 1), float(force_bandlim_hz), device=dev)
         lowpass = torch.sigmoid((cutoff - f) / 180.0)
     else:
-        cuts = [4000.0, 6000.0, 7500.0, 8000.0, 8000.0, 11025.0, 12000.0, 12000.0, 16000.0]
-        cutoff = torch.tensor(cuts, device=dev)[torch.randint(len(cuts), (n, 1), device=dev)]
-        lowpass = torch.where(coin(bandlim_prob), torch.sigmoid((cutoff - f) / 180.0), 1.0)
+        cuts = [
+            4000.0,
+            6000.0,
+            7500.0,
+            8000.0,
+            8000.0,
+            11025.0,
+            12000.0,
+            12000.0,
+            16000.0,
+        ]
+        cutoff = torch.tensor(cuts, device=dev)[
+            torch.randint(len(cuts), (n, 1), device=dev)
+        ]
+        lowpass = torch.where(
+            coin(bandlim_prob), torch.sigmoid((cutoff - f) / 180.0), 1.0
+        )
 
-    noisy = torch.fft.irfft(((torch.fft.rfft(rev + nz, n=L) + rumble) * mic + hiss) * lowpass, n=L)[:, :seg]
+    noisy = torch.fft.irfft(
+        ((torch.fft.rfft(rev + nz, n=L) + rumble) * mic + hiss) * lowpass, n=L
+    )[:, :seg]
 
-    # AGC pumping on input only
+    # AGC pumping on input (normalized to unity mean gain during active speech so speech loudness stays matched!)
     fr = SR // 50
     e = noisy[:, : seg // fr * fr].unflatten(1, (-1, fr)).pow(2).mean(2)
     e = F.avg_pool1d(e[:, None], 25, 1, 12, count_include_pad=False)[:, 0]
     g = (level.pow(2) / e.clamp(min=1e-12)).pow(rand(0.2, 0.55) / 2).clamp(0.5, 8.0)
-    g = torch.where(coin(0.25), F.interpolate(g[:, None], size=seg, mode="linear")[:, 0], 1.0)
+    sp_e = target[:, : seg // fr * fr].unflatten(1, (-1, fr)).pow(2).mean(2)
+    sp_act = (sp_e >= sp_e.amax(1, keepdim=True) * 1e-3).float()
+    g_sp = (g * sp_act).sum(1, keepdim=True) / sp_act.sum(1, keepdim=True).clamp(
+        min=1.0
+    )
+    g = (g / g_sp.clamp(min=0.5)).clamp(0.5, 8.0)
+    g = torch.where(
+        coin(0.25), F.interpolate(g[:, None], size=seg, mode="linear")[:, 0], 1.0
+    )
     noisy = noisy * g
 
     clip_lim = noisy.abs().amax(1, keepdim=True) * rand(0.35, 0.90)
@@ -400,21 +517,51 @@ def make_studio_batch(
         noisy = _apply_spectral_artifacts(noisy, dev)
 
     # Real recorded room pairs (RealMAN, ~10% of rows)
-    if real_pairs is not None and len(real_pairs) > 0 and force_bandlim_hz is None and seg <= 12 * SR:
+    if (
+        real_pairs is not None
+        and len(real_pairs) > 0
+        and force_bandlim_hz is None
+        and seg <= 12 * SR
+    ):
         n_real = max(1, n // 10)
         rx, rt = real_pairs.sample(n_real, seg)
-        sc = 10 ** (torch.empty(n_real, 1, device=dev).uniform_(-42, -16) / 20) / active_rms(rt)
+        sc = 10 ** (
+            torch.empty(n_real, 1, device=dev).uniform_(-42, -16) / 20
+        ) / active_rms(rt)
         rx, rt = rx * sc, rt * sc
-        rt = torch.fft.irfft(torch.fft.rfft(rt, n=seg) * highpass(torch.fft.rfftfreq(seg, 1 / SR, device=dev), LOW_CUT), n=seg)
+        rt = torch.fft.irfft(
+            torch.fft.rfft(rt, n=seg)
+            * highpass(torch.fft.rfftfreq(seg, 1 / SR, device=dev), LOW_CUT),
+            n=seg,
+        )
         rnz = noise.sample(n_real, seg, wrap=True)
         rsnr = torch.empty(n_real, 1, device=dev).uniform_(5, 30)
-        rx = rx + rnz / rms(rnz) * active_rms(rt) * 10 ** (-rsnr / 20) * (torch.rand(n_real, 1, device=dev) < 0.5)
+        rx = rx + rnz / rms(rnz) * active_rms(rt) * 10 ** (-rsnr / 20) * (
+            torch.rand(n_real, 1, device=dev) < 0.5
+        )
         noisy[:n_real], target[:n_real] = rx, rt
 
     if clean_prob > 0:
         is_clean = coin(clean_prob)
         noisy = torch.where(is_clean, target, noisy)
 
-    peak = target.abs().amax(1, keepdim=True).clamp(min=0.92)
+    # Pure non-speech noise-only rows (target == 0) so cafes/streets/fans/wind stay silent without hallucinating words
+    if noise_only_prob > 0 and force_bandlim_hz is None:
+        is_ns = coin(noise_only_prob)
+        if is_ns.any():
+            ns_bed = noise.sample(n, seg, wrap=True)
+            ns_lvl = 10 ** (rand(-45, -18) / 20)
+            ns_sig = ns_bed / rms(ns_bed) * ns_lvl + _wind_gusts(
+                n, seg, ns_lvl, dev
+            ) * coin(0.35)
+            ns_sig = torch.fft.irfft(
+                (torch.fft.rfft(ns_sig, n=L) * mic + hiss) * lowpass, n=L
+            )[:, :seg]
+            noisy = torch.where(is_ns, ns_sig, noisy)
+            target = torch.where(is_ns, torch.zeros_like(target), target)
+
+    peak = torch.maximum(
+        target.abs().amax(1, keepdim=True), torch.full((n, 1), 0.92, device=dev)
+    )
     scale_safe = 0.92 / peak
     return noisy * scale_safe, target * scale_safe

@@ -11,6 +11,7 @@ Two-stage distortion -> perception recipe (RE-USE 2026 + FINALLY + CleanMyMic re
       --mic-irs ~/experiments/studio-20261119/data/surrey_mics_48k.npy \
       --real-pairs ~/experiments/realman-20261119/pairs/train
 """
+
 import argparse
 import json
 import math
@@ -52,14 +53,30 @@ class STFTDisc(nn.Module):
         super().__init__()
         wn = nn.utils.parametrizations.weight_norm
         self.n_fft = n_fft
-        self.convs = nn.ModuleList([wn(nn.Conv2d(2, ch, (3, 9), padding=(1, 4)))] + [
-            wn(nn.Conv2d(ch, ch, (3, 9), stride=(1, 2), dilation=(d, 1), padding=(d, 4))) for d in (1, 2, 4)
-        ] + [wn(nn.Conv2d(ch, ch, (3, 3), padding=(1, 1)))])
+        self.convs = nn.ModuleList(
+            [wn(nn.Conv2d(2, ch, (3, 9), padding=(1, 4)))]
+            + [
+                wn(
+                    nn.Conv2d(
+                        ch, ch, (3, 9), stride=(1, 2), dilation=(d, 1), padding=(d, 4)
+                    )
+                )
+                for d in (1, 2, 4)
+            ]
+            + [wn(nn.Conv2d(ch, ch, (3, 3), padding=(1, 1)))]
+        )
         self.post = wn(nn.Conv2d(ch, 1, (3, 3), padding=(1, 1)))
         self.register_buffer("window", torch.hann_window(n_fft))
 
     def forward(self, x):
-        X = torch.stft(x, self.n_fft, self.n_fft // 4, window=self.window, normalized=True, return_complex=True)
+        X = torch.stft(
+            x,
+            self.n_fft,
+            self.n_fft // 4,
+            window=self.window,
+            normalized=True,
+            return_complex=True,
+        )
         Xc, _ = _safe_compress(X)
         h, feats = torch.stack([Xc.real, Xc.imag], 1).transpose(2, 3), []
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=x.is_cuda):
@@ -77,7 +94,9 @@ def gan_losses(discs, y, t):
         with torch.no_grad():
             _, real = d(t)
         adv = adv + F.relu(1.0 - logit).mean()
-        fm = fm + sum((a - b).abs().mean() / (b.abs().mean() + 1e-5) for a, b in zip(feats, real)) / len(feats)
+        fm = fm + sum(
+            (a - b).abs().mean() / (b.abs().mean() + 1e-5) for a, b in zip(feats, real)
+        ) / len(feats)
     return adv / len(discs), fm / len(discs)
 
 
@@ -88,20 +107,31 @@ class HighBandDisc(nn.Module):
         super().__init__()
         wn = nn.utils.parametrizations.weight_norm
         self.n_fft = n_fft
-        self.lo_bin = int(round(6000.0 * n_fft / SR))  # 6 kHz -> bin 128..513 (385 bins)
+        self.lo_bin = int(
+            round(6000.0 * n_fft / SR)
+        )  # 6 kHz -> bin 128..513 (385 bins)
         self.register_buffer("window", torch.hann_window(n_fft))
-        self.convs = nn.ModuleList([
-            wn(nn.Conv2d(1, ch, (3, 7), stride=(1, 2), padding=(1, 3))),
-            wn(nn.Conv2d(ch, ch * 2, (3, 7), stride=(1, 2), padding=(1, 3))),
-            wn(nn.Conv2d(ch * 2, ch * 2, (3, 5), stride=(1, 2), padding=(1, 2))),
-            wn(nn.Conv2d(ch * 2, ch * 2, (3, 5), stride=(1, 2), padding=(1, 2))),
-            wn(nn.Conv2d(ch * 2, ch * 2, (3, 3), padding=(1, 1))),
-        ])
+        self.convs = nn.ModuleList(
+            [
+                wn(nn.Conv2d(1, ch, (3, 7), stride=(1, 2), padding=(1, 3))),
+                wn(nn.Conv2d(ch, ch * 2, (3, 7), stride=(1, 2), padding=(1, 3))),
+                wn(nn.Conv2d(ch * 2, ch * 2, (3, 5), stride=(1, 2), padding=(1, 2))),
+                wn(nn.Conv2d(ch * 2, ch * 2, (3, 5), stride=(1, 2), padding=(1, 2))),
+                wn(nn.Conv2d(ch * 2, ch * 2, (3, 3), padding=(1, 1))),
+            ]
+        )
         self.post = wn(nn.Conv2d(ch * 2, 1, (3, 3), padding=(1, 1)))
 
     def forward(self, x):
-        X = torch.stft(x, self.n_fft, self.n_fft // 4, window=self.window, normalized=True, return_complex=True)
-        hi = (_safe_abs(X[:, self.lo_bin:]) + 1e-5).log()  # [B, F_hi, T]
+        X = torch.stft(
+            x,
+            self.n_fft,
+            self.n_fft // 4,
+            window=self.window,
+            normalized=True,
+            return_complex=True,
+        )
+        hi = (_safe_abs(X[:, self.lo_bin :]) + 1e-5).log()  # [B, F_hi, T]
         h = hi.transpose(1, 2).unsqueeze(1)  # [B, 1, T, F_hi]
         feats = []
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=x.is_cuda):
@@ -111,8 +141,40 @@ class HighBandDisc(nn.Module):
             return self.post(h).float(), feats
 
 
+class PeriodDisc(nn.Module):
+    """HiFi-GAN Multi-Period Waveform Discriminator: refines periodic vocal pitch harmonics for close-mic studio polish."""
+
+    def __init__(self, period, ch=24):
+        super().__init__()
+        wn = nn.utils.parametrizations.weight_norm
+        self.period = period
+        self.convs = nn.ModuleList(
+            [
+                wn(nn.Conv2d(1, ch, (5, 1), (3, 1), padding=(2, 0))),
+                wn(nn.Conv2d(ch, ch * 2, (5, 1), (3, 1), padding=(2, 0))),
+                wn(nn.Conv2d(ch * 2, ch * 4, (5, 1), (3, 1), padding=(2, 0))),
+                wn(nn.Conv2d(ch * 4, ch * 4, (5, 1), (3, 1), padding=(2, 0))),
+                wn(nn.Conv2d(ch * 4, ch * 4, (3, 1), 1, padding=(1, 0))),
+            ]
+        )
+        self.post = wn(nn.Conv2d(ch * 4, 1, (3, 1), 1, padding=(1, 0)))
+
+    def forward(self, x):
+        # x: [B, N] -> pad to multiple of period -> [B, 1, N//p, p]
+        b, n = x.shape
+        if n % self.period != 0:
+            x = F.pad(x, (0, self.period - (n % self.period)), mode="reflect")
+        h = x.view(b, 1, -1, self.period)
+        feats = []
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=x.is_cuda):
+            for conv in self.convs:
+                h = F.leaky_relu(conv(h), 0.2)
+                feats.append(h.float())
+            return self.post(h).float(), feats
+
+
 class WavLMConvLoss(nn.Module):
-    """Frozen WavLM CNN feature-encoder perceptual loss (FINALLY NeurIPS 2024: conv encoder, NOT transformer layers).
+    """Frozen WavLM CNN feature-encoder + Layer-1 transformer perceptual loss (FINALLY + PASE 2025).
 
     Supervises 0-8 kHz phonetic content and speaker timbre at 16 kHz to prevent word deletions and voice drift.
     """
@@ -125,8 +187,13 @@ class WavLMConvLoss(nn.Module):
         self._resample = AF.resample
         full = WavLMModel.from_pretrained(model_name)
         self.fe = full.feature_extractor.to(device).eval()
-        for p in self.fe.parameters():
-            p.requires_grad_(False)
+        self.fp = full.feature_projection.to(device).eval()
+        self.pos_conv = full.encoder.pos_conv_embed.to(device).eval()
+        self.enc_ln = full.encoder.layer_norm.to(device).eval()
+        self.layer0 = full.encoder.layers[0].to(device).eval()
+        for mod in (self.fe, self.fp, self.pos_conv, self.enc_ln, self.layer0):
+            for p in mod.parameters():
+                p.requires_grad_(False)
         del full
 
     def _extract(self, wav_16k):
@@ -135,10 +202,16 @@ class WavLMConvLoss(nn.Module):
         for layer in self.fe.conv_layers:
             x = layer(x)
             feats.append(x)
+        # Transformer layer 1 (PASE: preserves fine speaker timbre + phonetic clarity)
+        h = x.transpose(1, 2)
+        h, _ = self.fp(h)
+        h = h + self.pos_conv(h)
+        h = self.enc_ln(h)
+        h = self.layer0(h)[0]
+        feats.append(h.transpose(1, 2))
         return feats
 
     def forward(self, y_norm, t_norm):
-        # y_norm, t_norm are already talker-level normalized [B, N] at 48 kHz
         y16 = self._resample(y_norm, SR, 16000)
         t16 = self._resample(t_norm, SR, 16000)
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=y16.is_cuda):
@@ -166,7 +239,17 @@ def _safe_compress(Z, c=0.3):
 class StudioLoss(nn.Module):
     """Multi-resolution complex+asymmetric STFT + 8-24 kHz high-band + third-octave tone + L1 + SNR + WavLM conv."""
 
-    def __init__(self, asym=0.35, hb_weight=1.5, wav_weight=2.0, sdr_weight=0.15, tone_weight=0.5, wavlm_weight=0.0, wavlm=None, device="cuda"):
+    def __init__(
+        self,
+        asym=0.35,
+        hb_weight=1.5,
+        wav_weight=2.0,
+        sdr_weight=0.15,
+        tone_weight=0.5,
+        wavlm_weight=0.0,
+        wavlm=None,
+        device="cuda",
+    ):
         super().__init__()
         self.asym = asym
         self.hb_weight = hb_weight
@@ -189,30 +272,41 @@ class StudioLoss(nn.Module):
                 fb[i, m] = 1.0
         self.register_buffer("tone_fb", fb)
 
-    def forward(self, y, t, use_wavlm=True):
-        g = 0.05 / active_rms(t)
+    def forward(self, y, t, x=None, use_wavlm=True):
+        # Handle pure-noise zero-target rows safely: normalize by input level instead of target level
+        has_speech = t.abs().amax(1) > 1e-4
+        ref_rms = active_rms(t)
+        if (~has_speech).any():
+            in_rms = active_rms(x) if x is not None else torch.full_like(ref_rms, 0.05)
+            ref_rms = torch.where(has_speech[:, None], ref_rms, in_rms)
+        g = 0.05 / ref_rms
         yn, tn = y * g, t * g
         spec = 0.0
         hb = 0.0
         tone_l = 0.0
         for n in self.ffts:
             w = getattr(self, f"w{n}")
-            Ys = torch.stft(yn, n, n // 4, window=w, normalized=True, return_complex=True)
-            Ts = torch.stft(tn, n, n // 4, window=w, normalized=True, return_complex=True)
+            Ys = torch.stft(
+                yn, n, n // 4, window=w, normalized=True, return_complex=True
+            )
+            Ts = torch.stft(
+                tn, n, n // 4, window=w, normalized=True, return_complex=True
+            )
             Yc, Ym = _safe_compress(Ys)
             Tc, Tm = _safe_compress(Ts)
             d = Ym - Tm
-            mag_l = (d.pow(2) * (1.0 + self.asym * (d < 0))).mean()
+            asym_w = torch.where(has_speech[:, None, None], self.asym, 0.0)
+            mag_l = (d.pow(2) * (1.0 + asym_w * (d < 0))).mean()
             cplx_l = ((Yc.real - Tc.real).pow(2) + (Yc.imag - Tc.imag).pow(2)).mean()
             spec = spec + 400.0 * (mag_l + 0.5 * cplx_l)
-            if n == 1024:
-                y_hi = (_safe_abs(Ys[:, self.hb_lo:]) + 1e-5).log()
-                t_hi = (_safe_abs(Ts[:, self.hb_lo:]) + 1e-5).log()
+            if n == 1024 and has_speech.any():
+                y_hi = (_safe_abs(Ys[has_speech, self.hb_lo :]) + 1e-5).log()
+                t_hi = (_safe_abs(Ts[has_speech, self.hb_lo :]) + 1e-5).log()
                 dh = y_hi - t_hi
                 hb = (dh.abs() * (1.0 + 0.5 * self.asym * (dh < 0))).mean()
-            if n == 2048 and self.tone_weight > 0:
-                Yp = Ys.real.pow(2) + Ys.imag.pow(2)
-                Tp = Ts.real.pow(2) + Ts.imag.pow(2)
+            if n == 2048 and self.tone_weight > 0 and has_speech.any():
+                Yp = Ys[has_speech].real.pow(2) + Ys[has_speech].imag.pow(2)
+                Tp = Ts[has_speech].real.pow(2) + Ts[has_speech].imag.pow(2)
                 te = Tp.sum(1, keepdim=True)
                 act = (te >= te.amax(-1, keepdim=True) * 0.01).float()
                 denom = act.sum(-1).clamp(min=1.0)
@@ -222,17 +316,31 @@ class StudioLoss(nn.Module):
                 tone_l = (td - td.mean(-1, keepdim=True)).abs().mean()
         spec = spec / len(self.ffts) * 4.0
         wav_l = (yn - tn).abs().mean()
-        err_p = (yn - tn).pow(2).mean(1)
-        ref_p = tn.pow(2).mean(1).clamp(min=1e-6)
-        sdr_l = 10.0 * ((err_p + 1e-6) / ref_p).log10().clamp(min=-25.0).mean()
-        total = spec + self.hb_weight * hb + self.wav_weight * wav_l + self.sdr_weight * (sdr_l + 25.0) + self.tone_weight * tone_l
+        if has_speech.any():
+            err_p = (yn[has_speech] - tn[has_speech]).pow(2).mean(1)
+            ref_p = tn[has_speech].pow(2).mean(1).clamp(min=1e-6)
+            sdr_l = 10.0 * ((err_p + 1e-6) / ref_p).log10().clamp(min=-25.0).mean()
+        else:
+            sdr_l = torch.tensor(-25.0, device=y.device)
+        total = (
+            spec
+            + self.hb_weight * hb
+            + self.wav_weight * wav_l
+            + self.sdr_weight * (sdr_l + 25.0)
+            + self.tone_weight * tone_l
+        )
         wlm = 0.0
-        if use_wavlm and self.wavlm is not None and self.wavlm_weight > 0:
-            wlm = self.wavlm(yn, tn)
+        if (
+            use_wavlm
+            and self.wavlm is not None
+            and self.wavlm_weight > 0
+            and has_speech.any()
+        ):
+            wlm = self.wavlm(yn[has_speech], tn[has_speech])
             total = total + self.wavlm_weight * wlm
         return total, {
             "spec": float(spec.detach()),
-            "hb": float(hb.detach()),
+            "hb": float(hb.detach()) if isinstance(hb, torch.Tensor) else 0.0,
             "tone": float(tone_l.detach()) if isinstance(tone_l, torch.Tensor) else 0.0,
             "wav": float(wav_l.detach()),
             "sdr": float(-sdr_l.detach()),
@@ -251,7 +359,9 @@ def spectral_db_metrics(y, t):
     f = torch.fft.rfftfreq(1024, 1 / SR, device=y.device)
     hi = (f >= 8000) & (f <= 20000)
     hi_floor = Tm[:, hi].amax((1, 2), keepdim=True) * 1e-2 + 1e-7
-    hi_db = (20.0 * ((Ym[:, hi] + hi_floor).log10() - (Tm[:, hi] + hi_floor).log10())).abs()
+    hi_db = (
+        20.0 * ((Ym[:, hi] + hi_floor).log10() - (Tm[:, hi] + hi_floor).log10())
+    ).abs()
     return float(diff_db.mean()), float(hi_db.mean()), float(y.abs().max())
 
 
@@ -267,24 +377,75 @@ def main():
     ap.add_argument("run", help="output run directory")
     ap.add_argument("--steps", type=int, default=25000)
     ap.add_argument("--batch", type=int, default=20)
-    ap.add_argument("--seg-sec", type=int, default=4, help="training crop length in seconds")
+    ap.add_argument(
+        "--seg-sec", type=int, default=4, help="training crop length in seconds"
+    )
     ap.add_argument("--lr", type=float, default=None)
-    ap.add_argument("--init", help="checkpoint to initialize from (ignored when resuming)")
-    ap.add_argument("--gan", action="store_true", help="Stage 2: add STFT + HighBand discriminators & polish clean pool")
-    ap.add_argument("--gan-adv", type=float, default=1.0, help="adversarial loss weight")
-    ap.add_argument("--gan-fm", type=float, default=3.0, help="feature-matching loss weight")
-    ap.add_argument("--wavlm-weight", type=float, default=3.0, help="WavLM CNN encoder perceptual loss weight (0 disables)")
+    ap.add_argument(
+        "--init", help="checkpoint to initialize from (ignored when resuming)"
+    )
+    ap.add_argument(
+        "--gan",
+        action="store_true",
+        help="Stage 2: add STFT + HighBand discriminators & polish clean pool",
+    )
+    ap.add_argument(
+        "--gan-adv", type=float, default=1.0, help="adversarial loss weight"
+    )
+    ap.add_argument(
+        "--gan-fm", type=float, default=3.0, help="feature-matching loss weight"
+    )
+    ap.add_argument(
+        "--wavlm-weight",
+        type=float,
+        default=3.0,
+        help="WavLM CNN encoder perceptual loss weight (0 disables)",
+    )
     ap.add_argument("--asym", type=float, default=0.35)
-    ap.add_argument("--hold-every", type=int, default=8, help="run a 30s long-pause hold batch every K steps (0 disables)")
+    ap.add_argument(
+        "--hold-every",
+        type=int,
+        default=8,
+        help="run a 30s long-pause hold batch every K steps (0 disables)",
+    )
     ap.add_argument("--mic-irs", help="path to packed Surrey mic IRs .npy")
     ap.add_argument("--real-pairs", help="path to RealMAN paired room train dir")
-    ap.add_argument("--max-minutes", type=float, default=0.0, help="optional wall-clock budget in minutes")
+    ap.add_argument(
+        "--extra-clean",
+        help="optional extra packed studio speech pool prefix (e.g. hifitts_clean)",
+    )
+    ap.add_argument(
+        "--extra-clean-weight",
+        type=float,
+        default=0.40,
+        help="sampling share for --extra-clean",
+    )
+    ap.add_argument(
+        "--noise-only-prob",
+        type=float,
+        default=0.08,
+        help="share of pure non-speech zero-target rows",
+    )
+    ap.add_argument(
+        "--max-minutes",
+        type=float,
+        default=0.0,
+        help="optional wall-clock budget in minutes",
+    )
     ap.add_argument("--val-every", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=20261119)
     ap.add_argument("--size", choices=("m", "l"), default="l")
     ap.add_argument("--arch", choices=("studio", "dfn3_studio"), default="studio")
-    ap.add_argument("--base-ckpt", help="for --arch dfn3_studio: path to CleanMyMic Base (hold-10000.pt)")
-    ap.add_argument("--base-lr-mult", type=float, default=0.25, help="LR multiplier on pretrained Base weights in dfn3_studio")
+    ap.add_argument(
+        "--base-ckpt",
+        help="for --arch dfn3_studio: path to CleanMyMic Base (hold-10000.pt)",
+    )
+    ap.add_argument(
+        "--base-lr-mult",
+        type=float,
+        default=0.25,
+        help="LR multiplier on pretrained Base weights in dfn3_studio",
+    )
     args = ap.parse_args()
 
     run = Path(args.run).expanduser()
@@ -298,13 +459,31 @@ def main():
     root = Path(args.data).expanduser()
     spec = lambda d: {root / p: w for p, w in d.items()}
     dehiss = {root / p for p in STUDIO_DEHISS}
-    clean_spec = STUDIO_CLEAN_POLISH if args.gan else STUDIO_CLEAN
-    clean = Pool(spec(clean_spec), dev, dehissed=dehiss, memmap=True, split="train")
-    clean_val = Pool(spec(STUDIO_CLEAN), dev, dehissed=dehiss, memmap=True, split="val")
+    clean_spec = dict(STUDIO_CLEAN_POLISH if args.gan else STUDIO_CLEAN)
+    clean_train_map = spec(clean_spec)
+    clean_val_map = spec(STUDIO_CLEAN)
+    if args.extra_clean and Path(f"{args.extra_clean}.npy").exists():
+        ew = args.extra_clean_weight
+        clean_train_map = {k: v * (1.0 - ew) for k, v in clean_train_map.items()} | {
+            Path(args.extra_clean): ew
+        }
+        clean_val_map = {k: v * (1.0 - ew) for k, v in clean_val_map.items()} | {
+            Path(args.extra_clean): ew
+        }
+        print(
+            f"Added extra studio clean pool {args.extra_clean} (share={ew:.0%})",
+            flush=True,
+        )
+    clean = Pool(clean_train_map, dev, dehissed=dehiss, memmap=True, split="train")
+    clean_val = Pool(clean_val_map, dev, dehissed=dehiss, memmap=True, split="val")
     noise = Pool(spec(STUDIO_BEDS), dev, memmap=True, split="train")
     noise_val = Pool(spec(STUDIO_BEDS), dev, memmap=True, split="val")
-    events = Pool(spec(STUDIO_EVENTS), dev, memmap=True, split="train", max_len=EVENT_LEN)
-    events_val = Pool(spec(STUDIO_EVENTS), dev, memmap=True, split="val", max_len=EVENT_LEN)
+    events = Pool(
+        spec(STUDIO_EVENTS), dev, memmap=True, split="train", max_len=EVENT_LEN
+    )
+    events_val = Pool(
+        spec(STUDIO_EVENTS), dev, memmap=True, split="val", max_len=EVENT_LEN
+    )
 
     rirs = torch.from_numpy(np.load(root / "packed5" / "rirs.npy")).to(dev)
     rirs_train, rirs_val = rirs[:3800], rirs[3800:]
@@ -315,27 +494,70 @@ def main():
         print(f"Loaded {len(mic_irs)} measured mic IRs from {args.mic_irs}", flush=True)
     real_pairs = RealPairPool(args.real_pairs, device=dev) if args.real_pairs else None
     if real_pairs is not None:
-        print(f"Loaded {len(real_pairs)} real paired room clips from {args.real_pairs}", flush=True)
+        print(
+            f"Loaded {len(real_pairs)} real paired room clips from {args.real_pairs}",
+            flush=True,
+        )
 
     if args.arch == "dfn3_studio":
         res_ch = (32, 64, 96) if args.size == "l" else (24, 48, 64)
         n_attn = 3 if args.size == "l" else 2
         if args.base_ckpt and not (run / "last.pt").exists() and not args.init:
-            model = dfn3_studio.init_from_base(Path(args.base_ckpt).expanduser(), res_ch=res_ch, n_attn=n_attn).to(dev)
-            print(f"Initialized DFN3Studio from Base {args.base_ckpt} (spk={model.base.spk})", flush=True)
+            model = dfn3_studio.init_from_base(
+                Path(args.base_ckpt).expanduser(), res_ch=res_ch, n_attn=n_attn
+            ).to(dev)
+            print(
+                f"Initialized DFN3Studio from Base {args.base_ckpt} (spk={model.base.spk})",
+                flush=True,
+            )
         else:
             spk = 0
             if args.init:
-                spk = torch.load(Path(args.init).expanduser(), map_location="cpu", weights_only=False).get("config", {}).get("spk", 0)
+                spk = (
+                    torch.load(
+                        Path(args.init).expanduser(),
+                        map_location="cpu",
+                        weights_only=False,
+                    )
+                    .get("config", {})
+                    .get("spk", 0)
+                )
             elif (run / "last.pt").exists():
-                spk = torch.load(run / "last.pt", map_location="cpu", weights_only=False).get("config", {}).get("spk", 0)
-            model = dfn3_studio.DFN3Studio(res_ch=res_ch, n_attn=n_attn, spk=spk).to(dev)
-        config = {"arch": "dfn3_studio", "res_ch": res_ch, "n_attn": n_attn, "spk": model.base.spk}
+                spk = (
+                    torch.load(run / "last.pt", map_location="cpu", weights_only=False)
+                    .get("config", {})
+                    .get("spk", 0)
+                )
+            model = dfn3_studio.DFN3Studio(res_ch=res_ch, n_attn=n_attn, spk=spk).to(
+                dev
+            )
+        config = {
+            "arch": "dfn3_studio",
+            "res_ch": res_ch,
+            "n_attn": n_attn,
+            "spk": model.base.spk,
+        }
     else:
         if args.size == "m":
-            model_cfg = dict(ch=(32, 48, 64, 96), n_blocks=6, heads=4, global_hidden=256, look=2, past=2, df=True)
+            model_cfg = dict(
+                ch=(32, 48, 64, 96),
+                n_blocks=6,
+                heads=4,
+                global_hidden=256,
+                look=2,
+                past=2,
+                df=True,
+            )
         else:
-            model_cfg = dict(ch=(32, 64, 96, 128), n_blocks=6, heads=4, global_hidden=256, look=2, past=2, df=True)
+            model_cfg = dict(
+                ch=(32, 64, 96, 128),
+                n_blocks=6,
+                heads=4,
+                global_hidden=256,
+                look=2,
+                past=2,
+                df=True,
+            )
         config = {"arch": "studio"} | model_cfg
         model = StudioNet(**model_cfg).to(dev)
 
@@ -347,18 +569,28 @@ def main():
                 m.eval()
 
     wavlm = WavLMConvLoss(device=dev) if args.wavlm_weight > 0 else None
-    crit = StudioLoss(asym=args.asym, wavlm_weight=args.wavlm_weight, wavlm=wavlm, device=dev).to(dev)
+    crit = StudioLoss(
+        asym=args.asym, wavlm_weight=args.wavlm_weight, wavlm=wavlm, device=dev
+    ).to(dev)
 
     lr = args.lr or (1e-4 if args.gan else 3e-4)
     if args.arch == "dfn3_studio":
         param_groups = [
-            {"params": list(model.base.parameters()), "lr": lr * args.base_lr_mult, "lr_mult": args.base_lr_mult},
+            {
+                "params": list(model.base.parameters()),
+                "lr": lr * args.base_lr_mult,
+                "lr_mult": args.base_lr_mult,
+            },
             {"params": list(model.restore.parameters()), "lr": lr, "lr_mult": 1.0},
         ]
     else:
         param_groups = [{"params": list(model.parameters()), "lr": lr, "lr_mult": 1.0}]
     opt = torch.optim.AdamW(param_groups, lr=lr, betas=(0.8, 0.99), weight_decay=1e-4)
-    discs = nn.ModuleList([STFTDisc(n) for n in (4096, 2048, 1024, 512, 256)] + [HighBandDisc(1024)]).to(dev)
+    discs = nn.ModuleList(
+        [STFTDisc(n) for n in (4096, 2048, 1024, 512, 256)]
+        + [HighBandDisc(1024)]
+        + [PeriodDisc(p) for p in (2, 3, 5, 7, 11)]
+    ).to(dev)
     opt_d = torch.optim.AdamW(discs.parameters(), lr=1.5e-4, betas=(0.8, 0.99))
 
     step = 0
@@ -376,27 +608,77 @@ def main():
         elapsed_prev = st.get("elapsed_s", 0.0)
         print(f"Resumed {run} at step {step} (best_val={best_val:.4f})", flush=True)
     elif args.init:
-        st = torch.load(Path(args.init).expanduser(), map_location=dev, weights_only=False)
+        st = torch.load(
+            Path(args.init).expanduser(), map_location=dev, weights_only=False
+        )
         model.load_state_dict(st["model"])
-        print(f"Initialized weights from {args.init} (step {st.get('step', '?')})", flush=True)
+        print(
+            f"Initialized weights from {args.init} (step {st.get('step', '?')})",
+            flush=True,
+        )
 
     print(
         f"StudioNet-{args.size.upper()}: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M params"
-        + (f", discs {sum(p.numel() for p in discs.parameters()) / 1e6:.2f}M" if args.gan else ""),
+        + (
+            f", discs {sum(p.numel() for p in discs.parameters()) / 1e6:.2f}M"
+            if args.gan
+            else ""
+        ),
         flush=True,
     )
 
     # Fixed held-out validation views (never changed across steps)
     torch.manual_seed(0)
     val_views = {
-        "mixed": make_studio_batch(clean_val, noise_val, rirs_val, 16, SEG, events=events_val, rooms=rooms_val,
-                                   mic_irs=mic_irs, hold=0.25, clean_prob=0.0, bandlim_prob=0.5),
-        "bandlim_8k": make_studio_batch(clean_val, noise_val, rirs_val, 16, SEG, events=events_val, rooms=rooms_val,
-                                        mic_irs=mic_irs, hold=0.0, clean_prob=0.0, force_bandlim_hz=8000.0),
-        "clean_id": make_studio_batch(clean_val, noise_val, rirs_val, 16, SEG, events=events_val, rooms=rooms_val,
-                                      clean_prob=1.0),
-        "hold": make_studio_batch(clean_val, noise_val, rirs_val, 3, 30 * SR, events=events_val, rooms=rooms_val,
-                                  mic_irs=mic_irs, hold=1.0, clean_prob=0.0, bandlim_prob=0.4),
+        "mixed": make_studio_batch(
+            clean_val,
+            noise_val,
+            rirs_val,
+            16,
+            SEG,
+            events=events_val,
+            rooms=rooms_val,
+            mic_irs=mic_irs,
+            hold=0.25,
+            clean_prob=0.0,
+            bandlim_prob=0.5,
+        ),
+        "bandlim_8k": make_studio_batch(
+            clean_val,
+            noise_val,
+            rirs_val,
+            16,
+            SEG,
+            events=events_val,
+            rooms=rooms_val,
+            mic_irs=mic_irs,
+            hold=0.0,
+            clean_prob=0.0,
+            force_bandlim_hz=8000.0,
+        ),
+        "clean_id": make_studio_batch(
+            clean_val,
+            noise_val,
+            rirs_val,
+            16,
+            SEG,
+            events=events_val,
+            rooms=rooms_val,
+            clean_prob=1.0,
+        ),
+        "hold": make_studio_batch(
+            clean_val,
+            noise_val,
+            rirs_val,
+            3,
+            30 * SR,
+            events=events_val,
+            rooms=rooms_val,
+            mic_irs=mic_irs,
+            hold=1.0,
+            clean_prob=0.0,
+            bandlim_prob=0.4,
+        ),
     }
 
     def run_val(cur_step):
@@ -405,7 +687,9 @@ def main():
         metrics = {"step": cur_step}
         with torch.no_grad():
             for name, (vx, vt) in val_views.items():
-                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=dev == "cuda"):
+                with torch.autocast(
+                    "cuda", dtype=torch.bfloat16, enabled=dev == "cuda"
+                ):
                     vy = model(vx).float()
                 vloss, parts = crit(vy, vt, use_wavlm=(name != "hold"))
                 full_db, hi_db, peak = spectral_db_metrics(vy, vt)
@@ -421,7 +705,13 @@ def main():
                 if name in ("mixed", "bandlim_8k") and cur_step > 0:
                     for i in range(min(2, len(vx))):
                         for kind, arr in (("in", vx), ("out", vy), ("ref", vt)):
-                            sf.write(run / "samples" / f"{cur_step:06d}_{name}_{i}_{kind}.wav", arr[i].cpu().numpy(), SR)
+                            sf.write(
+                                run
+                                / "samples"
+                                / f"{cur_step:06d}_{name}_{i}_{kind}.wav",
+                                arr[i].cpu().numpy(),
+                                SR,
+                            )
         # Composite selection score (never selects on GAN loss): mixed + bandlim + clean identity + hold
         sel = (
             metrics["mixed"]["loss"]
@@ -432,9 +722,12 @@ def main():
         metrics["sel"] = round(sel, 4)
         with open(run / "validation.jsonl", "a") as f:
             f.write(json.dumps(metrics) + "\n")
-        print(f"VAL step={cur_step} sel={sel:.4f} mixed={metrics['mixed']['loss']:.3f} "
-              f"bwe8k_hi={metrics['bandlim_8k']['hi8_20_db']:.2f}dB "
-              f"clean={metrics['clean_id']['full_db']:.2f}dB hold={metrics['hold']['loss']:.3f}", flush=True)
+        print(
+            f"VAL step={cur_step} sel={sel:.4f} mixed={metrics['mixed']['loss']:.3f} "
+            f"bwe8k_hi={metrics['bandlim_8k']['hi8_20_db']:.2f}dB "
+            f"clean={metrics['clean_id']['full_db']:.2f}dB hold={metrics['hold']['loss']:.3f}",
+            flush=True,
+        )
         set_train_mode()
         return sel
 
@@ -448,8 +741,13 @@ def main():
     warmup = min(500, max(100, args.steps // 20))
 
     while step < args.steps:
-        if args.max_minutes > 0 and (elapsed_prev + (time.time() - wall_start)) / 60.0 >= args.max_minutes:
-            print(f"Reached time budget {args.max_minutes} min at step {step}", flush=True)
+        if (
+            args.max_minutes > 0
+            and (elapsed_prev + (time.time() - wall_start)) / 60.0 >= args.max_minutes
+        ):
+            print(
+                f"Reached time budget {args.max_minutes} min at step {step}", flush=True
+            )
             break
 
         # Cosine LR schedule with linear warmup (honors per-group lr_mult for pretrained Base vs RestoreHead)
@@ -461,41 +759,74 @@ def main():
         for pg in opt.param_groups:
             pg["lr"] = cur_lr * pg.get("lr_mult", 1.0)
 
-        is_hold = args.hold_every > 0 and (step % args.hold_every == args.hold_every - 1) and not args.gan
+        is_hold = args.hold_every > 0 and (
+            step % args.hold_every == args.hold_every - 1
+        )
         if is_hold:
-            x, t = make_studio_batch(clean, noise, rirs_train, 3, 30 * SR, events=events, rooms=rooms_train,
-                                     mic_irs=mic_irs, hold=1.0, clean_prob=0.0, bandlim_prob=0.45)
+            x, t = make_studio_batch(
+                clean,
+                noise,
+                rirs_train,
+                3,
+                30 * SR,
+                events=events,
+                rooms=rooms_train,
+                mic_irs=mic_irs,
+                hold=1.0,
+                clean_prob=0.0,
+                bandlim_prob=0.45,
+                noise_only_prob=0.0,
+            )
         else:
-            x, t = make_studio_batch(clean, noise, rirs_train, args.batch, args.seg_sec * SR, events=events, rooms=rooms_train,
-                                     mic_irs=mic_irs, real_pairs=real_pairs, hold=0.25,
-                                     clean_prob=0.15 if args.gan else 0.12, bandlim_prob=0.50)
+            x, t = make_studio_batch(
+                clean,
+                noise,
+                rirs_train,
+                args.batch,
+                args.seg_sec * SR,
+                events=events,
+                rooms=rooms_train,
+                mic_irs=mic_irs,
+                real_pairs=real_pairs,
+                hold=0.25,
+                clean_prob=0.15 if args.gan else 0.12,
+                bandlim_prob=0.50,
+                noise_only_prob=args.noise_only_prob,
+            )
 
         # Forward (BF16 in neural core, FP32 in STFT/loss)
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=dev == "cuda"):
             y = model(x).float()
 
-        # On 40s hold batches skip WavLM to save VRAM/time (already covered 80% of steps)
-        rec, parts = crit(y, t, use_wavlm=(not is_hold))
+        # On 30s hold batches skip WavLM to save VRAM/time
+        rec, parts = crit(y, t, x=x, use_wavlm=(not is_hold))
         loss = rec
         extra = ""
 
         if args.gan and not is_hold:
-            gan_b = min(len(y), 16)
-            i = int(torch.randint(t.shape[1] - GAN_SEG, ()))
-            yc, tc = y[:gan_b, i:i + GAN_SEG], t[:gan_b, i:i + GAN_SEG]
-            sc = 0.1 / tc.pow(2).mean(1, keepdim=True).sqrt().clamp(min=1e-4)
-            yc, tc = yc * sc, tc * sc
-            d_loss = sum(F.relu(1.0 - d(tc)[0]).mean() + F.relu(1.0 + d(yc.detach())[0]).mean() for d in discs) / len(discs)
-            opt_d.zero_grad(set_to_none=True)
-            d_loss.backward()
-            torch.nn.utils.clip_grad_norm_(discs.parameters(), 2.0)
-            opt_d.step()
+            sp_idx = torch.nonzero(t.abs().amax(1) > 1e-4, as_tuple=False)[:, 0][:16]
+            if len(sp_idx) >= 2:
+                i = int(torch.randint(t.shape[1] - GAN_SEG, ()))
+                yc, tc = y[sp_idx, i : i + GAN_SEG], t[sp_idx, i : i + GAN_SEG]
+                sc = 0.1 / tc.pow(2).mean(1, keepdim=True).sqrt().clamp(min=1e-4)
+                yc, tc = yc * sc, tc * sc
+                d_loss = sum(
+                    F.relu(1.0 - d(tc)[0]).mean()
+                    + F.relu(1.0 + d(yc.detach())[0]).mean()
+                    for d in discs
+                ) / len(discs)
+                opt_d.zero_grad(set_to_none=True)
+                d_loss.backward()
+                torch.nn.utils.clip_grad_norm_(discs.parameters(), 2.0)
+                opt_d.step()
 
-            discs.requires_grad_(False)
-            adv, fm = gan_losses(discs, yc, tc)
-            discs.requires_grad_(True)
-            loss = rec + args.gan_adv * adv + args.gan_fm * fm
-            extra = f" adv={adv.item():.3f} fm={fm.item():.3f} d={d_loss.item():.3f}"
+                discs.requires_grad_(False)
+                adv, fm = gan_losses(discs, yc, tc)
+                discs.requires_grad_(True)
+                loss = rec + args.gan_adv * adv + args.gan_fm * fm
+                extra = (
+                    f" adv={adv.item():.3f} fm={fm.item():.3f} d={d_loss.item():.3f}"
+                )
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
