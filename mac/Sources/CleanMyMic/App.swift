@@ -17,7 +17,7 @@ struct CleanMyMicApp: App {
         MenuBarExtra {
             MenuView(controller: controller)
         } label: {
-            Image(systemName: "waveform")
+            Image(systemName: controller.menuBarSymbol)
                 .accessibilityLabel("CleanMyMic")
         }
         .menuBarExtraStyle(.window)
@@ -61,10 +61,19 @@ final class Controller {
             defaults.set(noiseRemoval, forKey: "enabled")
             if !noiseRemoval { testing = false }  // off ends the headphone test (its didSet restarts)
             pipeline?.setMix(mix)
+            if oldValue != noiseRemoval {
+                systemRouting.update(cleanupOn: noiseRemoval, preferredInputUID: inputUID, allowClaim: noiseRemoval)
+                if noiseRemoval && needsAttention { restart() }
+            }
         }
+    }
+    let systemRouting = SystemInputRouting()
+    func setUseSystemInput(_ enabled: Bool) {
+        systemRouting.setEnabled(enabled, cleanupOn: noiseRemoval, preferredInputUID: inputUID)
     }
     var inputUID: String {  // "": automatic
         didSet {
+            guard inputUID != oldValue else { return }
             defaults.set(inputUID, forKey: "input")
             defaults.set(devices.first { $0.uid == inputUID }?.name, forKey: "inputName")  // to name it while it's away
             restart()
@@ -83,7 +92,11 @@ final class Controller {
     var testCleaned = true { didSet { pipeline?.setMix(mix) } }
     var devices = audioDevices()
     private(set) var headphones = defaultDevice(input: false)  // where a test plays: the system output
-    private(set) var status = "Starting…"
+    private(set) var status = "Starting…" {
+        didSet { startingSince = status == "Starting…" ? startingSince ?? Date() : nil }
+    }
+    private var startingSince: Date?  // how long the app has been trying to start, for the stuck check
+    private var lastHealthy = Date()  // the last pass of the running pipeline's health loop
     private(set) var isRunning = false
     private var pipeline: Pipeline?
     private var cleaning: AudioDeviceID?  // the mic in use, or being started
@@ -107,10 +120,47 @@ final class Controller {
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             Task { _ = await AVCaptureDevice.requestAccess(for: .audio) }
         }
-        watch(kAudioHardwarePropertyDefaultInputDevice) { [weak self] in Task { @MainActor in self?.systemMicChanged() } }
+        watch(kAudioHardwarePropertyDefaultInputDevice) { [weak self] in Task { @MainActor in self?.devicesChanged() } }
         watch(kAudioHardwarePropertyDevices) { [weak self] in Task { @MainActor in self?.devicesChanged() } }
         watch(kAudioHardwarePropertyDefaultOutputDevice) { [weak self] in Task { @MainActor in self?.outputChanged() } }
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.systemRouting.update(cleanupOn: false, preferredInputUID: self?.inputUID, release: true)
+            }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
+                                                          object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.restart() }
+        }
+        systemRouting.update(cleanupOn: noiseRemoval, preferredInputUID: inputUID, allowClaim: true)
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkStuck() }
+        }
         restart()
+    }
+
+    /// A hung audio path cannot be stopped from inside, and reopening the app has cleared it every time: do that.
+    private func checkStuck() {
+        guard audioIsStuck(startingSince: startingSince, running: isRunning, lastHealthy: lastHealthy, now: Date()) else { return }
+        let last = defaults.object(forKey: "relaunched") as? Date ?? .distantPast
+        guard Date().timeIntervalSince(last) > 60 else {  // it did not help a minute ago: say so and stop trying
+            isRunning = false
+            status = "Audio is stuck. Quit and reopen CleanMyMic."
+            return
+        }
+        defaults.set(Date(), forKey: "relaunched")
+        let fresh = NSWorkspace.OpenConfiguration()
+        fresh.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: fresh) { _, _ in exit(0) }
+    }
+
+    var needsAttention: Bool { !isRunning && !["Starting…", "Ready"].contains(status) }
+    var isSystemInput: Bool { devices.first { $0.id == defaultDevice(input: true) }?.uid == micUID }
+    var menuBarSymbol: String {
+        if !noiseRemoval { return "waveform.slash" }
+        if needsAttention { return "exclamationmark.triangle" }
+        return isRunning ? "waveform.circle.fill" : "waveform"
     }
 
     var headphoneName: String { devices.first { $0.id == headphones }?.name ?? "your headphones" }
@@ -120,6 +170,7 @@ final class Controller {
     }
 
     private func outputChanged() {
+        devices = audioDevices()
         headphones = defaultDevice(input: false)
         guard testing else { return }
         if testBlocker == nil { restart() } else { testing = false }  // e.g. headphones unplugged: off, not speakers
@@ -129,42 +180,16 @@ final class Controller {
     var microphoneName: String { devices.first { $0.id == source() }?.name ?? "No microphone found" }
     private var mix: Float { (testing ? testCleaned : noiseRemoval) ? Float(strength) : 0 }
 
-    /// Keep one call-app device for both cleaned and original voice; remember the physical mic across restarts.
-    private func route() throws {
-        guard let mic = devices.first(where: { $0.uid == micUID && $0.inputs })?.id else { return }
-        guard let current = defaultDevice(input: true), current != mic else { return }
-        defaults.set(devices.first { $0.id == current }?.uid, forKey: "restoreInput")
-        try setDefaultInput(mic)
-    }
-
-    private func unroute() {
-        let saved = defaults.string(forKey: "restoreInput")
-        defaults.removeObject(forKey: "restoreInput")
-        let all = audioDevices()
-        guard all.contains(where: { $0.uid == micUID && $0.id == defaultDevice(input: true) }) else { return }
-        if let real = microphoneSource([saved], in: all) { try? setDefaultInput(real) }
-    }
-
-    /// The mic to clean: the one last picked, or, while that's gone (AirPods in their case), the next best.
     private func source() -> AudioDeviceID? {
         let system = devices.first { $0.id == defaultDevice(input: true) }?.uid
-        return microphoneSource([inputUID, defaults.string(forKey: "restoreInput"), system], in: devices)
-    }
-
-    /// Someone picked a mic in Sound, or macOS did (AirPods connected): that's the one to clean now, and the system's
-    /// mic goes back to ours. Our own switch lands here too, and stops at the first guard's mic check.
-    private func systemMicChanged() {
-        devices = audioDevices()
-        guard observedMic != nil, let picked = devices.first(where: { $0.id == defaultDevice(input: true) }),
-              picked.isMicrophoneSource else { return }
-        defaults.set(picked.uid, forKey: "restoreInput")
-        if source() != cleaning { restart() }
-        else { do { try route() } catch { failed(String(describing: error), generation) } }
+        return microphoneSource([inputUID, system, defaults.string(forKey: "restoreInput")], in: devices)
     }
 
     /// A device came or went: the mic in use, or the one we've been waiting for.
     private func devicesChanged() {
         devices = audioDevices()
+        headphones = defaultDevice(input: false)
+        systemRouting.update(cleanupOn: noiseRemoval, preferredInputUID: inputUID)
         if source() != cleaning || cleanMicOutput(in: devices)?.id != destination
             || devices.first(where: { $0.uid == micUID })?.id != observedMic { restart() }
     }
@@ -192,7 +217,7 @@ final class Controller {
     private func micUseChanged() {
         guard let device = observedMic else { return }
         do {
-            let active = try deviceIsRunning(device)
+            let active = try otherAppIsRecording(from: device)
             guard active != consumerActive else { return }
             consumerActive = active
             restart()
@@ -203,25 +228,28 @@ final class Controller {
 
     func quit() {
         try? observeMic(nil)
-        unroute()
         NSApplication.shared.terminate(nil)
     }
 
     func refresh() { devicesChanged() }
 
-    private func restart() {
+    private func restart(recovering: Bool = false) {
         generation += 1
-        startTask?.cancel()
+        let previous = startTask
+        previous?.cancel()
         let gen = generation, old = pipeline
         pipeline = nil
         isRunning = false
         status = "Starting…"
-        startTask = Task { await start(gen, after: old) }
+        startTask = Task {
+            await previous?.value  // finish stopping any superseded engine before opening the next one
+            await Self.stop(old)
+            guard gen == generation else { return }
+            await start(gen, recovering: recovering)
+        }
     }
 
-    private func start(_ gen: Int, after old: Pipeline?) async {
-        await Self.stop(old)
-        guard gen == generation else { return }
+    private func start(_ gen: Int, recovering: Bool) async {
         do {
             devices = audioDevices()
             guard let output = cleanMicOutput(in: devices), let mic = devices.first(where: { $0.uid == micUID }) else {
@@ -237,8 +265,7 @@ final class Controller {
             try observeMic(mic.id)
             cleaning = input
             destination = output.id
-            try route()
-            consumerActive = try deviceIsRunning(mic.id)
+            consumerActive = try otherAppIsRecording(from: mic.id)
             if testing && (consumerActive || testBlocker != nil) { testing = false; return }  // didSet restarts
             guard consumerActive || testing else { status = "Ready"; return }
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
@@ -247,23 +274,41 @@ final class Controller {
                 failed("Allow the mic: System Settings > Privacy & Security > Microphone", gen)
                 return
             }
-            consumerActive = try deviceIsRunning(mic.id)
+            consumerActive = try otherAppIsRecording(from: mic.id)
             if testing && consumerActive { testing = false; return }
             guard consumerActive || testing, let target = testing ? headphones : output.id else {
                 status = "Ready"
                 return
             }
             let onError: @Sendable (String) -> Void = { [weak self] message in
-                Task { @MainActor in self?.failed(message, gen) }
+                Task { @MainActor in self?.recover(message, gen) }
             }
+            playbackWatch = PlaybackWatch(recovering: recovering)
             let p = try await Self.makePipeline(model: model, input: input, output: target, mix: mix,
                                                 studioPolish: studioPolish, onError: onError)
             guard gen == generation else { return await Self.stop(p) }  // switched again while this one loaded
             pipeline = p
             p.setMix(mix)
             p.setStudioPolish(studioPolish)
+            lastHealthy = Date()
             isRunning = true
             status = testing ? "Testing" : "In use"
+            while !Task.isCancelled {
+                try await Task.sleep(for: .seconds(3))
+                if !testing, let observedMic, try !otherAppIsRecording(from: observedMic) {
+                    restart()
+                    return
+                }
+                guard await Self.onDevices(p) else {
+                    recover("CleanMyMic lost its microphone or output.", gen)
+                    return
+                }
+                lastHealthy = Date()
+                if !playbackWatch.advanced(to: p.samplesDelivered) {
+                    recover("Audio stopped reaching the selected output.", gen)
+                    return
+                }
+            }
         } catch {
             failed(String(describing: error), gen)
         }
@@ -281,20 +326,34 @@ final class Controller {
         return p
     }
 
+    @concurrent
+    private nonisolated static func onDevices(_ p: Pipeline) async -> Bool { p.onIntendedDevices }
+
+    private var playbackWatch = PlaybackWatch(recovering: false)
+
+    private func recover(_ message: String, _ gen: Int) {
+        guard gen == generation else { return }
+        if playbackWatch.canRestart { restart(recovering: true) }
+        else { failed(message, gen) }
+    }
+
     /// The running pipeline gave up on a device change.
     private func failed(_ message: String, _ gen: Int) {
         guard gen == generation else { return }
         generation += 1
-        startTask?.cancel()
+        let previous = startTask
+        previous?.cancel()
         let old = pipeline
         pipeline = nil
         status = message
         isRunning = false
         cleaning = nil  // the next device change tries again
         destination = nil
-        try? observeMic(nil)
-        unroute()  // don't leave apps on a silent cable
-        Task { await Self.stop(old) }
+        systemRouting.update(cleanupOn: false, preferredInputUID: inputUID, release: true)
+        startTask = Task {
+            await previous?.value
+            await Self.stop(old)
+        }
     }
 
     @concurrent
