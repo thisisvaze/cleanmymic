@@ -62,6 +62,11 @@ struct SettingsView: View {
         } footer: {
             Text("How much background noise to remove when CleanMyMic is on. Lower keeps more of your voice's character.")
         }
+        Section {
+            Toggle("Studio polish", isOn: $controller.studioPolish)
+        } footer: {
+            Text("Adds gentle broadcast EQ, speech-gated leveling, and low-rumble filtering after cleanup. Peak protection always stays on.")
+        }
     }
 
     @ViewBuilder private var model: some View {

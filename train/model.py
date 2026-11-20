@@ -179,11 +179,18 @@ def stream(model, wav):
 
 def load(path, map_location="cpu"):
     """Model from a checkpoint; v4+ checkpoints carry their constructor args. Studio-stage ones (train.py --arch
-    dfn3) are DeepFilterNet3's network: dfn3.py."""
-    state = torch.load(path, map_location=map_location)
-    if state.get("config", {}).get("arch") == "dfn3":
+    dfn3) are DeepFilterNet3's network: dfn3.py. Full-band checkpoints use arch == 'studio' or 'dfn3_studio'."""
+    state = torch.load(path, map_location=map_location, weights_only=False)
+    arch = state.get("config", {}).get("arch")
+    if arch == "dfn3":
         import dfn3
         return dfn3.load(path), state
+    if arch == "studio":
+        import studio_net
+        return studio_net.load(path, map_location=map_location)
+    if arch == "dfn3_studio":
+        import dfn3_studio
+        return dfn3_studio.load(path, map_location=map_location)
     model = Model(**state.get("config", {}))
     model.load_state_dict(state["model"])
     return model, state
