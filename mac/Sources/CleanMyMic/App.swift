@@ -63,6 +63,7 @@ final class Controller {
     var preferredMissing: Bool { !inputUID.isEmpty && !microphones.contains { $0.uid == inputUID } }
     var preferredName: String { defaults.string(forKey: "inputName") ?? "Your chosen microphone" }
     var strength: Double { didSet { defaults.set(strength, forKey: "strength"); pipeline?.setMix(mix) } }
+    var studioPolish: Bool { didSet { defaults.set(studioPolish, forKey: "studioPolish"); pipeline?.setStudioPolish(studioPolish) } }
     var model: String { didSet { if model != oldValue { defaults.set(model, forKey: "model"); restart() } } }
     let models = bundledModels()
     /// Mic check: hear yourself through headphones, to compare original and cleaned. A call app opening the mic ends it.
@@ -86,6 +87,7 @@ final class Controller {
         noiseRemoval = defaults.object(forKey: "enabled") as? Bool ?? true
         inputUID = defaults.string(forKey: "input") ?? ""
         strength = defaults.object(forKey: "strength") as? Double ?? 1
+        studioPolish = defaults.object(forKey: "studioPolish") as? Bool ?? true
         let saved = defaults.string(forKey: "model") ?? defaultModel
         model = models.contains(saved) ? saved : defaultModel  // a model dropped from the app falls back to Base
         try? SMAppService.mainApp.register()  // start at login
@@ -243,10 +245,11 @@ final class Controller {
                 Task { @MainActor in self?.failed(message, gen) }
             }
             let p = try await Self.makePipeline(model: model, input: input, output: target, mix: mix,
-                                                onError: onError)
+                                                studioPolish: studioPolish, onError: onError)
             guard gen == generation else { return await Self.stop(p) }  // switched again while this one loaded
             pipeline = p
             p.setMix(mix)
+            p.setStudioPolish(studioPolish)
             isRunning = true
             status = testing ? "Testing" : "In use"
         } catch {
@@ -258,8 +261,10 @@ final class Controller {
     /// engines takes up to seconds: never on the main actor, or the menu freezes.
     @concurrent
     private nonisolated static func makePipeline(model: URL, input: AudioDeviceID, output: AudioDeviceID, mix: Float,
+                                                 studioPolish: Bool,
                                                  onError: @escaping @Sendable (String) -> Void) async throws -> Pipeline {
-        let p = try Pipeline(model: model, input: input, output: output, mix: mix, onError: onError)
+        let p = try Pipeline(model: model, input: input, output: output, mix: mix, studioPolish: studioPolish,
+                             onError: onError)
         try p.start()
         return p
     }

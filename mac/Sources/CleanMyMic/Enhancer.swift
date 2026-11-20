@@ -12,6 +12,7 @@ nonisolated final class Enhancer {
     let window: [Float], c: Float  // c: the model's spectrum exponent (1: plain spectrum)
     let look: Int  // frames the model looks ahead: its output lags by 1 + look hops
     var mix: Float = 1  // strength: 1 = the model's output, 0 = the raw input, time-aligned with it
+    var polish = StudioPolish(enabled: false, limitPeaks: false)  // Pipeline turns peak limiting + optional polish on
     private var wasBypassed = false
     var buf = [Float](repeating: 0, count: win), tail = [Float](repeating: 0, count: hop), dry: [Float]
     let fwd = vDSP_DFT_zrop_CreateSetup(nil, vDSP_Length(win), .FORWARD)!
@@ -72,6 +73,7 @@ nonisolated final class Enhancer {
         if wasBypassed {  // don't replay stale overlap or recurrent state when cleanup resumes
             for a in state.values { for i in 0..<a.count { a[i] = 0 } }
             tail = [Float](repeating: 0, count: hop)
+            polish.reset()
             wasBypassed = false
         }
         let (re, im) = rfft(zip(buf, window).map(*))
@@ -97,7 +99,8 @@ nonisolated final class Enhancer {
         }
         let frame = zip(irfft(yr, yi), window).map(*)
         defer { tail = Array(frame[hop...]) }
-        let wet = (0..<hop).map { tail[$0] + frame[$0] }
+        var wet = (0..<hop).map { tail[$0] + frame[$0] }
+        polish.process(&wet)
         return mix == 1 ? wet : (0..<hop).map { mix * wet[$0] + (1 - mix) * raw[$0] }
     }
 

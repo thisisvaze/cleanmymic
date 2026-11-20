@@ -19,6 +19,7 @@ import numpy as np
 import torch
 
 import dfn3
+import dfn3_studio
 from model import BINS, Model, load
 
 
@@ -40,7 +41,7 @@ if __name__ == "__main__":
     else:
         model = (load(ckpt)[0] if ckpt != "none" else Model()).eval()
         meta = ({"engine": "CleanMyMic", "window": "vorbis", "compress": "1", "look": str(dfn3.LOOK)}
-                if isinstance(model, dfn3.DFN3) else  # the studio stage: DeepFilterNet3's network and framing
+                if isinstance(model, (dfn3.DFN3, dfn3_studio.DFN3Studio)) else
                 {"engine": "CleanMyMic", "window": "sqrt-hann", "compress": "0.3", "look": str(model.look)})
     if ckpt == "none":
         with torch.no_grad():

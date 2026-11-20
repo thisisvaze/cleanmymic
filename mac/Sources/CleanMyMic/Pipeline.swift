@@ -15,7 +15,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
     private var format: AVAudioFormat?, converter: AVAudioConverter?  // the mic's; set only while `mic` is stopped
     private let enhancer: Enhancer  // the worker thread's alone once running
     private let lock = NSLock()
-    private var inFifo: [Float] = [], outFifo: [Float] = [], mix: Float, running = true, busy = 0.0, frames = 0
+    private var inFifo: [Float] = [], outFifo: [Float] = [], mix: Float, studioPolish: Bool, running = true, busy = 0.0, frames = 0
     private let wake = DispatchSemaphore(value: 0)
     private let rewiring = DispatchQueue(label: "CleanMyMic.rewire")  // device changes, off AVAudioEngine's threads
     private var observers: [NSObjectProtocol] = []
@@ -24,11 +24,12 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
     private static let maxQueued = 3 * hop  // output at most ~30 ms ahead of the speaker
 
     /// onError: a device change the pipeline could not recover from (on some background thread).
-    init(model: URL, input: AudioDeviceID, output: AudioDeviceID, mix: Float,
+    init(model: URL, input: AudioDeviceID, output: AudioDeviceID, mix: Float, studioPolish: Bool = true,
          onError: @escaping @Sendable (String) -> Void) throws {
         let enhancer = try Enhancer(model)
         enhancer.mix = mix
-        (self.enhancer, self.mix, self.onError) = (enhancer, mix, onError)
+        enhancer.polish = StudioPolish(enabled: studioPolish, limitPeaks: true)
+        (self.enhancer, self.mix, self.studioPolish, self.onError) = (enhancer, mix, studioPolish, onError)
         sink = AVAudioSinkNode { [unowned self] _, count, list in
             receive(list, count)
             return noErr
@@ -81,6 +82,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
     }
 
     func setMix(_ m: Float) { lock.withLock { mix = m } }
+    func setStudioPolish(_ enabled: Bool) { lock.withLock { studioPolish = enabled } }
 
     /// Average model time per 10 ms frame, in ms.
     var msPerFrame: Double { lock.withLock { frames > 0 ? busy / Double(frames) * 1000 : 0 } }
@@ -169,8 +171,9 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
     private func work() {
         while true {
             wake.wait()
-            while let (frame, mix) = nextFrame() {
+            while let (frame, mix, polishOn) = nextFrame() {
                 enhancer.mix = mix
+                enhancer.polish.enabled = polishOn
                 let t = Date()
                 let y = (try? enhancer.process(frame)) ?? frame
                 let dt = Date().timeIntervalSince(t)
@@ -185,11 +188,11 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
         }
     }
 
-    private func nextFrame() -> ([Float], Float)? {
+    private func nextFrame() -> ([Float], Float, Bool)? {
         lock.withLock {
             guard running, inFifo.count >= hop else { return nil }
             defer { inFifo.removeFirst(hop) }
-            return (Array(inFifo.prefix(hop)), mix)
+            return (Array(inFifo.prefix(hop)), mix, studioPolish)
         }
     }
 }
