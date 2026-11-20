@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The menu bar panel, laid out like the system's Wi-Fi and Bluetooth menus with standard controls only.
+/// Compact native menu bar panel (Wi-Fi / Bluetooth popover proportions).
 struct MenuView: View {
     @Bindable var controller: Controller
     @Environment(\.openWindow) private var openWindow
@@ -13,92 +13,108 @@ struct MenuView: View {
 
     private var subtitle: String {
         if controller.noiseRemoval { return stateLabel }
-        if controller.isRunning { return "Off · Passing original mic through" }
+        if controller.isRunning { return "Off · Passthrough" }
         return stateLabel == "Ready" ? "Off" : "Off · \(stateLabel)"
     }
 
-    private var micCaption: String {
-        if controller.preferredMissing {
-            return "Using \(controller.microphoneName) until it reconnects."
-        }
-        let target = controller.isSystemInput ? "Active as Mac’s default input." : "Choose CleanMyMic in your call app."
-        return controller.inputUID.isEmpty ? "Using \(controller.microphoneName) · \(target)" : target
+    private var micNote: String? {
+        if controller.preferredMissing { return "Using \(controller.microphoneName)" }
+        if controller.inputUID.isEmpty { return controller.microphoneName }
+        return nil
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("CleanMyMic").font(.headline)
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("CleanMyMic").font(.callout.weight(.semibold))
                     Text(subtitle)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Toggle("CleanMyMic", isOn: $controller.noiseRemoval)  // the main switch: what calls get
                     .labelsHidden()
                     .toggleStyle(.switch)
+                    .controlSize(.small)
                     .help("Off switches Mac Sound away from CleanMyMic and passes original audio to apps using it")
             }
-            .padding(12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
 
             if let error = controller.systemRouting.error {
-                Text(error).font(.caption).padding([.horizontal, .bottom], 12)
+                Text(error).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10).padding(.bottom, 6)
             }
             if stateLabel == "Needs attention" {
                 Text(controller.status)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding([.horizontal, .bottom], 12)
+                    .padding(.horizontal, 10).padding(.bottom, 6)
             }
 
-            if controller.noiseRemoval {  // off: just the switch, like Bluetooth
-                Divider().padding(.horizontal, 12)
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("Microphone", selection: $controller.inputUID) {
+            if controller.noiseRemoval {
+                Divider().padding(.horizontal, 10)
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("Mic", selection: $controller.inputUID) {
                         Text("Automatic").tag("")
                         if controller.preferredMissing {
-                            Text("\(controller.preferredName) (not connected)").tag(controller.inputUID)
+                            Text("\(controller.preferredName) (offline)").tag(controller.inputUID)
                         }
                         ForEach(controller.microphones) { Text($0.name).tag($0.uid) }
                     }
-                    .help("Using \(controller.microphoneName)")
-                    Text(micCaption)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .controlSize(.small)
+                    .help("Using \(controller.microphoneName) · Choose CleanMyMic in your call app")
+                    if let micNote {
+                        Text(micNote)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
-                .padding(12)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
 
-                Divider().padding(.horizontal, 12)
-                VStack(alignment: .leading, spacing: 8) {
+                Divider().padding(.horizontal, 10)
+                VStack(alignment: .leading, spacing: 5) {
                     HStack {
-                        Text("Mic check")
+                        Text("Mic check").font(.callout)
                         Spacer()
                         Toggle("Mic check", isOn: $controller.testing)
                             .labelsHidden()
                             .toggleStyle(.switch)
+                            .controlSize(.small)
                             .disabled(!controller.testing && controller.testBlocker != nil)
+                            .help("Hear your mic in headphones before a call")
                     }
-                    Text(controller.testing ? "Playing in \(controller.headphoneName). Calls aren't affected."
-                         : controller.testBlocker ?? "Hear your mic in headphones before a call.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                     if controller.testing {
                         Picker("Compare", selection: $controller.testCleaned) {
                             Text("Original").tag(false)
                             Text("Cleaned").tag(true)
                         }
                         .pickerStyle(.segmented)
+                        .controlSize(.small)
                         .labelsHidden()
+                        Text("In \(controller.headphoneName)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    } else if let blocker = controller.testBlocker {
+                        Text(blocker)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(12)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
             }
 
-            Divider().padding(.horizontal, 12)
+            Divider().padding(.horizontal, 10)
             VStack(spacing: 0) {
                 MenuRow("Settings…") {
                     dismiss()
@@ -106,12 +122,12 @@ struct MenuView: View {
                     NSApp.activate()  // a menu bar app's window opens behind others otherwise
                 }
                 .keyboardShortcut(",")
-                MenuRow("Quit CleanMyMic") { controller.quit() }
+                MenuRow("Quit") { controller.quit() }
                     .keyboardShortcut("q")
             }
-            .padding(5)
+            .padding(4)
         }
-        .frame(width: 300)
+        .frame(width: 236)
         .onAppear { controller.refresh() }
         .onDisappear { controller.testing = false }  // never left playing into headphones unseen
     }
@@ -128,8 +144,9 @@ private struct MenuRow: View {
     var body: some View {
         Button(action: action) {
             Text(title)
+                .font(.callout)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(.fill.tertiary.opacity(hovered ? 1 : 0), in: .rect(cornerRadius: 5))
                 .contentShape(.rect)
