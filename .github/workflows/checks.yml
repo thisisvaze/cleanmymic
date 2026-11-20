@@ -40,6 +40,6 @@ jobs:
       - name: Check installer configuration
         run: python3 mac/installer/verify.py
       - name: Build audio test tool
-        run: swiftc -O mac/live/main.swift mac/Sources/CleanMyMic/Enhancer.swift -o "$RUNNER_TEMP/cleanmymic-live"
+        run: swiftc -O mac/live/main.swift mac/Sources/CleanMyMic/Enhancer.swift mac/Sources/CleanMyMic/StudioPolish.swift -o "$RUNNER_TEMP/cleanmymic-live"
       - name: Build processing benchmark
-        run: swiftc -O eval/latency.swift mac/Sources/CleanMyMic/Enhancer.swift -o "$RUNNER_TEMP/cleanmymic-latency"
+        run: swiftc -O eval/latency.swift mac/Sources/CleanMyMic/Enhancer.swift mac/Sources/CleanMyMic/StudioPolish.swift -o "$RUNNER_TEMP/cleanmymic-latency"
