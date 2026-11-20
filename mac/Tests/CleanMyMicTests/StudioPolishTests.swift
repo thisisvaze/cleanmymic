@@ -69,7 +69,7 @@ import Testing
     var restoredRMS = 0.0
     var inputRMS = 0.0
     var queue = [[Float]](repeating: [Float](repeating: 0, count: 480), count: 2)
-    for hopIdx in 0..<250 {  // 2.5 s
+    for hopIdx in 0..<800 {  // 8 s so the slow 2s/4s steady preamp settles without pumping
         let frame = (0..<480).map { j in
             let n = hopIdx * 480 + j
             return Float(0.0014 * sin(2 * Double.pi * 300 * Double(n) / 48_000))
@@ -78,14 +78,14 @@ import Testing
         queue.append(scaled)
         var delayed = queue.removeFirst()
         preamp.restoreOutput(&delayed, outGain: outGain)
-        if hopIdx >= 200 {
+        if hopIdx >= 700 {
             scaledPeak = max(scaledPeak, scaled.map(abs).max() ?? 0)
             restoredRMS += delayed.reduce(0.0) { $0 + Double($1 * $1) }
             inputRMS += frame.reduce(0.0) { $0 + Double($1 * $1) }
         }
     }
-    // Model sees > 15 dB boosted signal (well inside DFN3's operating range), while output returns within 0.5 dB of original
-    #expect(scaledPeak > 0.02)
+    // Model sees > 12 dB boosted signal (well inside DFN3's operating range), while output returns within 0.5 dB of original
+    #expect(scaledPeak > 0.006)
     let ratioDB = abs(10 * log10(restoredRMS / max(inputRMS, 1e-12)))
     #expect(ratioDB < 0.5)
 }

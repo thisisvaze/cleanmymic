@@ -30,16 +30,27 @@ struct CleanMyMicApp: App {
     }
 }
 
+private nonisolated let studioModel = "DFN3Studio-v2"
 private nonisolated let defaultModel = "Hold-10k"
 
-/// The models the app bundles, by resource name. Only Base ships today; others appear here when bundled.
+/// The models the app bundles, by resource name.
 nonisolated func bundledModels(_ bundle: Bundle = .main) -> [String] {
     (bundle.urls(forResourcesWithExtension: "mlmodelc", subdirectory: nil) ?? [])
         .map { $0.deletingPathExtension().lastPathComponent }.sorted()
 }
 
+nonisolated func preferredDefaultModel(in models: [String]) -> String {
+    if models.contains(studioModel) { return studioModel }
+    if models.contains(defaultModel) { return defaultModel }
+    return models.first ?? defaultModel
+}
+
 nonisolated func modelDisplayName(_ resource: String) -> String {
-    resource == defaultModel ? "CleanMyMic Base" : resource
+    switch resource {
+    case studioModel: "CleanMyMic Studio"
+    case defaultModel: "CleanMyMic Base"
+    default: resource
+    }
 }
 
 @Observable
@@ -88,8 +99,9 @@ final class Controller {
         inputUID = defaults.string(forKey: "input") ?? ""
         strength = defaults.object(forKey: "strength") as? Double ?? 1
         studioPolish = defaults.object(forKey: "studioPolish") as? Bool ?? true
-        let saved = defaults.string(forKey: "model") ?? defaultModel
-        model = models.contains(saved) ? saved : defaultModel  // a model dropped from the app falls back to Base
+        let fallback = preferredDefaultModel(in: models)
+        let saved = defaults.string(forKey: "model") ?? fallback
+        model = models.contains(saved) ? saved : fallback  // a model dropped from the app falls back cleanly
         try? SMAppService.mainApp.register()  // start at login
         // Ask for the mic up front: the system prompt takes focus, which would close the menu panel mid-toggle.
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
@@ -297,8 +309,9 @@ func check(mic: String, output: String) -> Never {
         print("devices:", devices.map { "\($0.name) (\($0.inputs ? "in" : "")\($0.outputs ? " out" : ""))" })
         exit(1)
     }
-    let modelName = modelDisplayName(defaultModel)
-    guard let model = Bundle.main.url(forResource: defaultModel, withExtension: "mlmodelc") else {
+    let chosen = preferredDefaultModel(in: bundledModels())
+    let modelName = modelDisplayName(chosen)
+    guard let model = Bundle.main.url(forResource: chosen, withExtension: "mlmodelc") else {
         print(AudioError.noModel(modelName))
         exit(1)
     }

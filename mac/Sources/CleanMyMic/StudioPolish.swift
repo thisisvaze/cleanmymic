@@ -19,11 +19,13 @@ nonisolated struct InputPreamp {
     private var prevOutGain = 1.0
     private var gainHistory: [Double]
 
-    // Per-10ms-hop constants at 48 kHz (hop = 480)
-    private let envAttack = 1.0 - exp(-480.0 / (0.02 * 48_000))   // 20 ms fast attack on loud speech
-    private let envRelease = 1.0 - exp(-480.0 / (0.50 * 48_000))  // 0.5 s track down on quiet mics
-    private let gainDown = 1.0 - exp(-480.0 / (0.04 * 48_000))    // 40 ms back-off if loudness rises
-    private let gainUp = 1.0 - exp(-480.0 / (0.35 * 48_000))      // 350 ms smooth rise (slower than DFN3 norm)
+    // Per-10ms-hop constants at 48 kHz (hop = 480):
+    // Very slow release (4 s) & rise (2 s) keep gain rock-steady mid-sentence with < 0.02 dB/hop movement,
+    // eliminating any audible fluctuation while lifting quiet far-field mics into the neural model's sweet spot.
+    private let envAttack = 1.0 - exp(-480.0 / (0.04 * 48_000))   // 40 ms attack on louder speech
+    private let envRelease = 1.0 - exp(-480.0 / (4.0 * 48_000))   // 4 s slow release -> zero mid-sentence pumping
+    private let gainDown = 1.0 - exp(-480.0 / (0.15 * 48_000))    // 150 ms smooth back-off (hard peak cap still guards spikes)
+    private let gainUp = 1.0 - exp(-480.0 / (2.0 * 48_000))       // 2 s smooth rise -> stays slower than DFN3 ERB norm
     private let maxGain = 40.0                                     // up to +32 dB for -60 dBFS far-field mics
 
     init(enabled: Bool = false, look: Int = 2) {
