@@ -30,14 +30,32 @@ nonisolated enum SystemInputChange: Equatable {
     case claim(AudioDeviceID, previousUID: String), restore(AudioDeviceID)
 
     static func decide(current: AudioDevice?, devices: [AudioDevice], previousUID: String?,
-                       enabled: Bool, allowClaim: Bool) -> Self {
+                       preferredInputUID: String? = nil, enabled: Bool, allowClaim: Bool,
+                       leaveVirtualInput: Bool = false) -> Self {
         guard let current else { return .none }  // Core Audio may be between devices
-        if let previousUID {
+        // Pick the best non-CleanMyMic input to hand back to macOS: explicit user choice in CleanMyMic (if connected),
+        // then whatever macOS was using before CleanMyMic claimed it (even a third-party virtual input), then built-in.
+        func restoreTarget() -> AudioDeviceID? {
+            if let preferredInputUID, !preferredInputUID.isEmpty, preferredInputUID != micUID,
+               let chosen = devices.first(where: { $0.uid == preferredInputUID && $0.isMicrophoneSource }) {
+                return chosen.id
+            }
+            if let previousUID,
+               let original = devices.first(where: { $0.uid == previousUID && $0.inputs && $0.uid != micUID }) {
+                return original.id
+            }
+            return microphoneSource([], in: devices)
+        }
+        if previousUID != nil {
             guard current.uid == micUID else { return .releaseOwnership }
             guard !enabled else { return .none }
-            // Restore even a third-party virtual input if that was the user's choice.
-            let original = devices.first { $0.uid == previousUID && $0.inputs && $0.uid != micUID }
-            guard let target = original?.id ?? microphoneSource([], in: devices) else { return .none }
+            guard let target = restoreTarget() else { return .none }
+            return .restore(target)
+        }
+        // Even if CleanMyMic was chosen manually in macOS Sound settings, turning CleanMyMic off or quitting
+        // always switches macOS Sound away so the Mac is never left on an off or dead virtual mic.
+        if leaveVirtualInput, current.uid == micUID {
+            guard let target = restoreTarget() else { return .none }
             return .restore(target)
         }
         guard enabled, allowClaim, current.uid != micUID, !current.uid.isEmpty,

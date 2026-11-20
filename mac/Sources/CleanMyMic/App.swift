@@ -17,7 +17,7 @@ struct CleanMyMicApp: App {
         MenuBarExtra {
             MenuView(controller: controller)
         } label: {
-            Image(systemName: "waveform")
+            Image(systemName: controller.menuBarSymbol)
                 .accessibilityLabel("CleanMyMic")
         }
         .menuBarExtraStyle(.window)
@@ -50,15 +50,19 @@ final class Controller {
             defaults.set(noiseRemoval, forKey: "enabled")
             if !noiseRemoval { testing = false }  // off ends the headphone test (its didSet restarts)
             pipeline?.setMix(mix)
-            if oldValue != noiseRemoval { systemRouting.update(cleanupOn: noiseRemoval, allowClaim: noiseRemoval) }
+            if oldValue != noiseRemoval {
+                systemRouting.update(cleanupOn: noiseRemoval, preferredInputUID: inputUID, allowClaim: noiseRemoval)
+                if noiseRemoval && needsAttention { restart() }
+            }
         }
     }
     let systemRouting = SystemInputRouting()
     func setUseSystemInput(_ enabled: Bool) {
-        systemRouting.setEnabled(enabled, cleanupOn: noiseRemoval)
+        systemRouting.setEnabled(enabled, cleanupOn: noiseRemoval, preferredInputUID: inputUID)
     }
     var inputUID: String {  // "": automatic
         didSet {
+            guard inputUID != oldValue else { return }
             defaults.set(inputUID, forKey: "input")
             defaults.set(devices.first { $0.uid == inputUID }?.name, forKey: "inputName")  // to name it while it's away
             restart()
@@ -107,13 +111,15 @@ final class Controller {
         watch(kAudioHardwarePropertyDefaultOutputDevice) { [weak self] in Task { @MainActor in self?.outputChanged() } }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
                                                object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.systemRouting.update(cleanupOn: false, release: true) }
+            MainActor.assumeIsolated {
+                self?.systemRouting.update(cleanupOn: false, preferredInputUID: self?.inputUID, release: true)
+            }
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.restart() }
         }
-        systemRouting.update(cleanupOn: noiseRemoval, allowClaim: true)
+        systemRouting.update(cleanupOn: noiseRemoval, preferredInputUID: inputUID, allowClaim: true)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkStuck() }
         }
@@ -135,6 +141,14 @@ final class Controller {
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: fresh) { _, _ in exit(0) }
     }
 
+    var needsAttention: Bool { !isRunning && !["Starting…", "Ready"].contains(status) }
+    var isSystemInput: Bool { devices.first { $0.id == defaultDevice(input: true) }?.uid == micUID }
+    var menuBarSymbol: String {
+        if !noiseRemoval { return "waveform.slash" }
+        if needsAttention { return "exclamationmark.triangle" }
+        return isRunning ? "waveform.circle.fill" : "waveform"
+    }
+
     var headphoneName: String { devices.first { $0.id == headphones }?.name ?? "your headphones" }
     var testBlocker: String? {
         headphoneTestBlocker(output: devices.first { $0.id == headphones },
@@ -142,6 +156,7 @@ final class Controller {
     }
 
     private func outputChanged() {
+        devices = audioDevices()
         headphones = defaultDevice(input: false)
         guard testing else { return }
         if testBlocker == nil { restart() } else { testing = false }  // e.g. headphones unplugged: off, not speakers
@@ -159,7 +174,8 @@ final class Controller {
     /// A device came or went: the mic in use, or the one we've been waiting for.
     private func devicesChanged() {
         devices = audioDevices()
-        systemRouting.update(cleanupOn: noiseRemoval)
+        headphones = defaultDevice(input: false)
+        systemRouting.update(cleanupOn: noiseRemoval, preferredInputUID: inputUID)
         if source() != cleaning || cleanMicOutput(in: devices)?.id != destination
             || devices.first(where: { $0.uid == micUID })?.id != observedMic { restart() }
     }
@@ -316,7 +332,7 @@ final class Controller {
         isRunning = false
         cleaning = nil  // the next device change tries again
         destination = nil
-        systemRouting.update(cleanupOn: false, release: true)
+        systemRouting.update(cleanupOn: false, preferredInputUID: inputUID, release: true)
         startTask = Task {
             await previous?.value
             await Self.stop(old)

@@ -9,6 +9,8 @@ final class SystemInputRouting {
     private let currentInput: () -> AudioDeviceID?
     private let selectInput: (AudioDeviceID) throws -> Void
     private var wantsSystemInput = false
+    private var lastCleanupOn = false
+    private var lastPreferredInputUID: String?
     private(set) var enabled: Bool
     private(set) var error: String?
     private var requestedClaim = false
@@ -25,16 +27,19 @@ final class SystemInputRouting {
         enabled = defaults.bool(forKey: "useSystemInput")
     }
 
-    func setEnabled(_ value: Bool, cleanupOn: Bool) {
+    func setEnabled(_ value: Bool, cleanupOn: Bool, preferredInputUID: String? = nil) {
         enabled = value
         defaults.set(value, forKey: "useSystemInput")
         error = nil
-        update(cleanupOn: cleanupOn, allowClaim: value)
+        update(cleanupOn: cleanupOn, preferredInputUID: preferredInputUID, allowClaim: value)
     }
 
-    /// Only the app that took the default may restore it. Older builds used the same ownership key.
-    func update(cleanupOn: Bool, allowClaim: Bool = false, release: Bool = false) {
+    /// Claims the Mac's default input when opted in, and always switches away from CleanMyMic when off or quitting.
+    func update(cleanupOn: Bool, preferredInputUID: String? = nil, allowClaim: Bool = false, release: Bool = false) {
+        lastCleanupOn = cleanupOn && !release
+        if let preferredInputUID { lastPreferredInputUID = preferredInputUID }
         wantsSystemInput = cleanupOn && enabled && !release
+        let leaveVirtualInput = !cleanupOn || release
         let all = availableDevices()
         if allowClaim { requestedClaim = true }
         if !wantsSystemInput { requestedClaim = false }
@@ -53,15 +58,20 @@ final class SystemInputRouting {
                         try selectInput(id)
                         defaults.set(current.uid, forKey: "restoringTo")
                     } catch { self.error = String(describing: error) }
+                    return
                 }
-                return
+                if !(release && current.uid == micUID) {
+                    return
+                }
             }
             self.pendingInput = nil
             routingCheck?.cancel()
         }
         let change = SystemInputChange.decide(current: current, devices: all,
                                               previousUID: defaults.string(forKey: "restoreInput"),
-                                              enabled: wantsSystemInput, allowClaim: requestedClaim)
+                                              preferredInputUID: lastPreferredInputUID,
+                                              enabled: wantsSystemInput, allowClaim: requestedClaim,
+                                              leaveVirtualInput: leaveVirtualInput)
         do {
             switch change {
             case .none:
@@ -93,7 +103,7 @@ final class SystemInputRouting {
                         pendingInput = nil
                         self.error = "The Mac’s input did not switch. Check Sound settings."
                     } else {
-                        update(cleanupOn: wantsSystemInput)
+                        update(cleanupOn: lastCleanupOn, preferredInputUID: lastPreferredInputUID)
                     }
                 }
             }

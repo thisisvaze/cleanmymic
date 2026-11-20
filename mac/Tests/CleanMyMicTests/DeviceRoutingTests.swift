@@ -141,3 +141,44 @@ import Testing
     router.update(cleanupOn: false, release: true)
     #expect(writes == [mic.id, usb.id, mic.id])
 }
+
+@MainActor @Test func turningOffOrQuittingAlwaysLeavesCleanMyMicEvenIfPickedManually() {
+    let suite = "dev.vaze.CleanMyMic.tests." + UUID().uuidString
+    let prefs = UserDefaults(suiteName: suite)!
+    defer { prefs.removePersistentDomain(forName: suite) }
+    let mic = AudioDevice(id: 1, uid: micUID, name: "CleanMyMic", inputs: true, outputs: false)
+    let cable = AudioDevice(id: 2, uid: cableUID, name: "Cable", inputs: false, outputs: true)
+    let macMic = AudioDevice(id: 3, uid: "builtin", name: "MacBook Pro Microphone", inputs: true, outputs: false)
+    let airpods = AudioDevice(id: 4, uid: "airpods", name: "AirPods Pro", inputs: true, outputs: true)
+    var current = mic.id  // user manually picked CleanMyMic in Sound settings while useSystemInput is off
+    var writes: [AudioDeviceID] = []
+    let router = SystemInputRouting(defaults: prefs, devices: { [mic, cable, macMic, airpods] },
+                                    current: { current }, select: { writes.append($0); current = $0 })
+    // While cleanup is ON and useSystemInput is OFF, respect the manual Sound settings choice
+    router.update(cleanupOn: true, preferredInputUID: "airpods")
+    #expect(writes.isEmpty && current == mic.id)
+    // Toggling CleanMyMic OFF switches Sound settings away to the user's chosen physical mic (AirPods)
+    router.update(cleanupOn: false, preferredInputUID: "airpods")
+    #expect(writes == [airpods.id] && current == airpods.id)
+    // If the user picks CleanMyMic again manually and quits, quit also switches away (falling back to Mac mic when AirPods aren't chosen)
+    current = mic.id
+    router.update(cleanupOn: false, preferredInputUID: "", release: true)
+    #expect(writes == [airpods.id, macMic.id] && current == macMic.id)
+}
+
+@Test func restorePrefersChosenPhysicalMicOverStaleSavedInput() {
+    let mic = AudioDevice(id: 1, uid: micUID, name: "CleanMyMic", inputs: true, outputs: false)
+    let macMic = AudioDevice(id: 2, uid: "mac", name: "MacBook Pro Microphone", inputs: true, outputs: false)
+    let airpods = AudioDevice(id: 3, uid: "airpods", name: "AirPods Pro", inputs: true, outputs: true)
+    let devices = [mic, macMic, airpods]
+    // Previous system input was MacBook, but user switched to AirPods inside CleanMyMic -> turning Off restores AirPods
+    let change = SystemInputChange.decide(current: mic, devices: devices, previousUID: "mac",
+                                          preferredInputUID: "airpods", enabled: false, allowClaim: false,
+                                          leaveVirtualInput: true)
+    #expect(change == .restore(airpods.id))
+    // If chosen AirPods are disconnected, falls back to previous saved MacBook mic
+    let fallback = SystemInputChange.decide(current: mic, devices: [mic, macMic], previousUID: "mac",
+                                            preferredInputUID: "airpods", enabled: false, allowClaim: false,
+                                            leaveVirtualInput: true)
+    #expect(fallback == .restore(macMic.id))
+}
