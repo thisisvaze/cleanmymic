@@ -15,12 +15,13 @@ StudioNet v2 applies four findings from 2026 universal speech enhancement resear
 
 Measured November 20, 2026 via `train/export.py` (`--precision mixed`: FP16 on `linear`/`matmul`/`gru`, FP32 on convolutions and spectral math; plus `fp32` reference for `pro`). Every exported `.mlpackage` passed 200-frame PyTorch-vs-Core ML parity, digital-silence & sparse-tone finiteness checks, and `mac/live/main.swift --check-bypass` in the real Swift `Enhancer.swift` engine.
 
-| Preset (`--size`) | Precision | Total Params (`S1 + Refiner`, `spk_dim=256`) | `.mlpackage` | M5 Pro `CPU_ONLY` | M5 Pro `CPU+NE` | M5 Pro `ALL` | Worst Parity (200 fr) | Target Mac tier |
-|---|---|---:|---:|---:|---:|---:|---:|---|
-| `lite` | `mixed` | **3.01M** (`2.76M + 0.25M`) | **6.8 MB** | **1.128 ms** | **1.138 ms** (RTF 0.114) | **1.146 ms** | **0.0173** | Base M1 / M2 / distilled low-power |
-| `pro` *(default target)* | `mixed` | **6.35M** (`5.67M + 0.68M`) | **14.4 MB** | **1.916 ms** | **1.905 ms** (RTF 0.191) | **2.107 ms** | **0.0228** | M3 / M4 / M5 Pro |
-| `pro` *(exact FP32 ref)* | `fp32` | **6.35M** (`5.67M + 0.68M`) | **25.8 MB** | **2.278 ms** | **2.059 ms** (RTF 0.206) | **2.034 ms** | **0.0000** | M3 / M4 / M5 Pro |
-| `max` *(teacher / flagship)* | `mixed` | **9.01M** (`8.33M + 0.68M`) | **19.8 MB** | **2.505 ms** | **2.508 ms** (RTF 0.251) | **2.466 ms** | **0.0168** | M4 Pro / M5 Pro / online teacher for `lite` |
+| Preset (`--size`) | Arch | Precision | Total Params | `.mlpackage` | M5 Pro `CPU_ONLY` | M5 Pro `CPU+NE` | M5 Pro `ALL` | Target Mac tier |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| `pro` *(recommended fast path)* | `dfn3_studio_v2` | `mixed` | **4.63M** (`2.13M DFN3 + 1.84M S1 + 0.66M Ref`, `spk=0`) | **10.6 MB** | **1.597 ms** | **1.649 ms** | **1.511 ms** (RTF 0.151) | M1 / M3 / M4 / M5 Pro |
+| `lite` | `studio_v2` | `mixed` | **3.01M** (`2.76M + 0.25M`, `spk=256`) | **6.8 MB** | **1.128 ms** | **1.138 ms** (RTF 0.114) | **1.146 ms** | Base M1 / M2 / distilled low-power |
+| `pro` | `studio_v2` | `mixed` | **6.35M** (`5.67M + 0.68M`, `spk=256`) | **14.4 MB** | **1.916 ms** | **1.905 ms** (RTF 0.191) | **2.107 ms** | M3 / M4 / M5 Pro |
+| `pro` *(exact FP32 ref)* | `studio_v2` | `fp32` | **6.35M** (`5.67M + 0.68M`, `spk=256`) | **25.8 MB** | **2.278 ms** | **2.059 ms** (RTF 0.206) | **2.034 ms** | M3 / M4 / M5 Pro |
+| `max` *(teacher / flagship)* | `studio_v2` | `mixed` | **9.01M** (`8.33M + 0.68M`, `spk=256`) | **19.8 MB** | **2.505 ms** | **2.508 ms** (RTF 0.251) | **2.466 ms** | M4 Pro / M5 Pro / online teacher for `lite` |
 
 *(Measured on Apple M5 Pro with isolated Core ML `predict` loops; M1/M3/M4 Pro timings and live HAL audio-thread p99 latency have not yet been measured on hardware.)*
 
