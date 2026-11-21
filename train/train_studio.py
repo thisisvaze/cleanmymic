@@ -45,7 +45,7 @@ from studio_data import (
 from studio_net import STUDIO_PRESETS, StudioNet, StudioNetV2
 
 SEG = 6 * SR
-GAN_SEG = SR // 2
+GAN_SEG = 2 * SR
 
 
 class STFTDisc(nn.Module):
@@ -413,6 +413,12 @@ def main():
     )
     ap.add_argument(
         "--gan-fm", type=float, default=3.0, help="feature-matching loss weight"
+    )
+    ap.add_argument(
+        "--rec-weight",
+        type=float,
+        default=1.0,
+        help="weight on spectral/waveform regression anchor during Stage-2 GAN (e.g. 0.2 for balanced GAN polish)",
     )
     ap.add_argument(
         "--wavlm-weight",
@@ -1024,7 +1030,18 @@ def main():
 
         # On 30s hold batches skip WavLM to save VRAM/time
         rec, parts = crit(y, t, x=x, use_wavlm=(not is_hold))
-        loss = rec
+        if args.rec_weight != 1.0 and not is_hold:
+            has_sp = t.abs().amax(1) > 1e-4
+            if has_sp.any() and (~has_sp).any():
+                rec_sp, _ = crit(y[has_sp], t[has_sp], x=x[has_sp], use_wavlm=True)
+                rec_ns, _ = crit(y[~has_sp], t[~has_sp], x=x[~has_sp], use_wavlm=False)
+                loss = args.rec_weight * rec_sp + rec_ns
+            elif has_sp.any():
+                loss = args.rec_weight * rec
+            else:
+                loss = rec
+        else:
+            loss = rec
         extra = ""
 
         # Optional online student-teacher distillation (e.g. StudioNetV2-Pro -> StudioNetV2-Lite)
@@ -1041,8 +1058,9 @@ def main():
         if args.gan and not is_hold:
             sp_idx = torch.nonzero(t.abs().amax(1) > 1e-4, as_tuple=False)[:, 0][:16]
             if len(sp_idx) >= 2:
-                i = int(torch.randint(t.shape[1] - GAN_SEG, ()))
-                yc, tc = y[sp_idx, i : i + GAN_SEG], t[sp_idx, i : i + GAN_SEG]
+                gseg = min(GAN_SEG, t.shape[1])
+                i = int(torch.randint(max(1, t.shape[1] - gseg + 1), ()))
+                yc, tc = y[sp_idx, i : i + gseg], t[sp_idx, i : i + gseg]
                 sc = 0.1 / tc.pow(2).mean(1, keepdim=True).sqrt().clamp(min=1e-4)
                 yc, tc = yc * sc, tc * sc
                 d_loss = sum(
