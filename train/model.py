@@ -188,7 +188,7 @@ def load(path, map_location="cpu"):
     if arch in ("studio", "studio_v2"):
         import studio_net
         return studio_net.load(path, map_location=map_location)
-    if arch == "dfn3_studio":
+    if arch in ("dfn3_studio", "dfn3_studio_v2"):
         import dfn3_studio
         return dfn3_studio.load(path, map_location=map_location)
     model = Model(**state.get("config", {}))

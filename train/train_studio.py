@@ -464,7 +464,9 @@ def main():
     ap.add_argument("--seed", type=int, default=20261119)
     ap.add_argument("--size", choices=("lite", "m", "l", "pro", "max"), default="l")
     ap.add_argument(
-        "--arch", choices=("studio", "studio_v2", "dfn3_studio"), default="studio"
+        "--arch",
+        choices=("studio", "studio_v2", "dfn3_studio", "dfn3_studio_v2"),
+        default="studio",
     )
     ap.add_argument(
         "--spk-dim",
@@ -567,7 +569,11 @@ def main():
             Path(args.init).expanduser(), map_location=dev, weights_only=False
         )
 
-    freeze_s1 = args.arch == "studio_v2" and args.gan and not args.no_freeze_stage1
+    freeze_s1 = (
+        args.arch in ("studio_v2", "dfn3_studio_v2")
+        and args.gan
+        and not args.no_freeze_stage1
+    )
     if args.arch == "dfn3_studio":
         res_ch = (32, 64, 96) if args.size in ("l", "pro", "max") else (24, 48, 64)
         n_attn = 3 if args.size in ("l", "pro", "max") else 2
@@ -598,6 +604,59 @@ def main():
             "n_attn": n_attn,
             "spk": model.base.spk,
         }
+    elif args.arch == "dfn3_studio_v2":
+        s1_ch = (
+            (32, 64, 96, 128) if args.size in ("pro", "max", "l") else (24, 48, 64, 96)
+        )
+        s1_blocks = 8 if args.size == "max" else (6 if args.size in ("pro", "l") else 4)
+        ref_ch = (24, 48, 80, 96)
+        ref_blocks = 3
+        use_refiner = bool(args.gan)
+        if args.base_ckpt and not (run / "last.pt").exists() and not args.init:
+            model = dfn3_studio.init_v2_from_base(
+                Path(args.base_ckpt).expanduser(),
+                s1_ch=s1_ch,
+                s1_blocks=s1_blocks,
+                ref_ch=ref_ch,
+                ref_blocks=ref_blocks,
+                use_refiner=use_refiner,
+            ).to(dev)
+            print(
+                f"Initialized DFN3StudioV2 from Base {args.base_ckpt} (spk={model.base.spk}, use_refiner={use_refiner})",
+                flush=True,
+            )
+        else:
+            icfg = {}
+            if init_state is not None:
+                icfg = init_state.get("config", {})
+            elif (run / "last.pt").exists():
+                icfg = torch.load(
+                    run / "last.pt", map_location="cpu", weights_only=False
+                ).get("config", {})
+            s1_ch = tuple(icfg.get("s1_ch", s1_ch))
+            s1_blocks = icfg.get("s1_blocks", s1_blocks)
+            ref_ch = tuple(icfg.get("ref_ch", ref_ch))
+            ref_blocks = icfg.get("ref_blocks", ref_blocks)
+            spk = icfg.get("spk", 0)
+            model = dfn3_studio.DFN3StudioV2(
+                s1_ch=s1_ch,
+                s1_blocks=s1_blocks,
+                ref_ch=ref_ch,
+                ref_blocks=ref_blocks,
+                use_refiner=use_refiner or bool(icfg.get("use_refiner", False)),
+                spk=spk,
+            ).to(dev)
+        config = {
+            "arch": "dfn3_studio_v2",
+            "s1_ch": s1_ch,
+            "s1_blocks": s1_blocks,
+            "ref_ch": ref_ch,
+            "ref_blocks": ref_blocks,
+            "use_refiner": model.use_refiner,
+            "spk": model.base.spk,
+        }
+        if freeze_s1 and model.use_refiner:
+            model.freeze_stage1()
     elif args.arch == "studio_v2":
         preset = STUDIO_PRESETS[args.size]
         s1_cfg = dict(preset["s1"]) | {"spk_dim": args.spk_dim}
@@ -627,6 +686,13 @@ def main():
         model.train()
         if freeze_s1 and isinstance(model, StudioNetV2):
             model.stage1.eval()
+        elif (
+            freeze_s1
+            and isinstance(model, dfn3_studio.DFN3StudioV2)
+            and model.use_refiner
+        ):
+            model.base.eval()
+            model.restore.eval()
         # Keep pretrained DFN3 BatchNorm statistics frozen during fine-tuning (critical for Base stability!)
         for m in model.modules():
             if isinstance(m, nn.BatchNorm2d):
@@ -651,16 +717,31 @@ def main():
     )
 
     lr = args.lr or (1e-4 if args.gan else 3e-4)
-    if args.arch == "dfn3_studio":
+    if args.arch == "dfn3_studio" or (
+        args.arch == "dfn3_studio_v2" and not (freeze_s1 and model.use_refiner)
+    ):
         param_groups = [
             {
-                "params": list(model.base.parameters()),
+                "params": [p for p in model.base.parameters() if p.requires_grad],
                 "lr": lr * args.base_lr_mult,
                 "lr_mult": args.base_lr_mult,
             },
-            {"params": list(model.restore.parameters()), "lr": lr, "lr_mult": 1.0},
+            {
+                "params": [
+                    p
+                    for p in list(model.restore.parameters())
+                    + (
+                        list(model.refiner.parameters())
+                        if getattr(model, "refiner", None) is not None
+                        else []
+                    )
+                    if p.requires_grad
+                ],
+                "lr": lr,
+                "lr_mult": 1.0,
+            },
         ]
-    elif freeze_s1 and isinstance(model, StudioNetV2):
+    elif freeze_s1 and isinstance(model, (StudioNetV2, dfn3_studio.DFN3StudioV2)):
         param_groups = [
             {"params": list(model.refiner.parameters()), "lr": lr, "lr_mult": 1.0}
         ]
@@ -703,6 +784,22 @@ def main():
             print(
                 f"Loaded Stage-1 weights from {args.init} into StudioNetV2.stage1 "
                 f"(step {init_state.get('step', '?')}, frozen={freeze_s1})",
+                flush=True,
+            )
+        elif (
+            isinstance(model, dfn3_studio.DFN3StudioV2)
+            and model.use_refiner
+            and not init_state.get("config", {}).get("use_refiner", False)
+        ):
+            missing, unexpected = model.load_state_dict(
+                init_state["model"], strict=False
+            )
+            assert not unexpected and all(k.startswith("refiner.") for k in missing), (
+                f"unexpected mismatch loading S1 into DFN3StudioV2: missing={missing[:5]}, unexpected={unexpected[:5]}"
+            )
+            print(
+                f"Loaded Stage-1 weights from {args.init} into DFN3StudioV2 (base+restore frozen={freeze_s1}, "
+                f"step {init_state.get('step', '?')})",
                 flush=True,
             )
         else:

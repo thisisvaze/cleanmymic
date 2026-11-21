@@ -151,7 +151,9 @@ if __name__ == "__main__":
                 "compress": "1",
                 "look": str(dfn3.LOOK),
             }
-            if isinstance(model, (dfn3.DFN3, dfn3_studio.DFN3Studio))
+            if isinstance(
+                model, (dfn3.DFN3, dfn3_studio.DFN3Studio, dfn3_studio.DFN3StudioV2)
+            )
             else {
                 "engine": "CleanMyMic",
                 "window": "sqrt-hann",

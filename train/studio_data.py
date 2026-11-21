@@ -30,10 +30,8 @@ STUDIO_CLEAN = {
     "packed5/src/vocalset": 0.05,  # 8.8 h, 44.1->48 kHz vocals/breaths (CC BY 4.0)
 }
 STUDIO_CLEAN_POLISH = {
-    "packed5/src/vctk1": 0.50,
-    "packed5/src/slr83": 0.30,
-    "packed5/src/aishell3": 0.15,
-    "packed5/src/vocalset": 0.05,
+    "packed5/src/vctk1": 0.90,
+    "packed5/src/vocalset": 0.10,
 }
 STUDIO_DEHISS = {
     "packed5/src/vctk1",
