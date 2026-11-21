@@ -185,7 +185,7 @@ def load(path, map_location="cpu"):
     if arch == "dfn3":
         import dfn3
         return dfn3.load(path), state
-    if arch == "studio":
+    if arch in ("studio", "studio_v2"):
         import studio_net
         return studio_net.load(path, map_location=map_location)
     if arch == "dfn3_studio":
