@@ -107,3 +107,69 @@ import Testing
         #expect(scaled == frame)
     }
 }
+
+@Test func adaptiveEQRespondsDifferentlyToMuffledVsHarshBrightMics() {
+    // Muffled mic: strong 260 Hz + 1 kHz, almost no 4.2 kHz presence
+    var muffledPolish = StudioPolish(enabled: true)
+    for hopIdx in 0..<250 {  // 2.5 s in 10 ms hops
+        var frame = (0..<480).map { j in
+            let t = Double(hopIdx * 480 + j) / 48_000
+            return Float(0.08 * sin(2 * Double.pi * 260 * t) + 0.05 * sin(2 * Double.pi * 1000 * t) + 0.002 * sin(2 * Double.pi * 4200 * t))
+        }
+        muffledPolish.process(&frame)
+    }
+
+    // Harsh bright thin mic: weak 260 Hz, strong 4.2 kHz
+    var brightPolish = StudioPolish(enabled: true)
+    for hopIdx in 0..<250 {
+        var frame = (0..<480).map { j in
+            let t = Double(hopIdx * 480 + j) / 48_000
+            return Float(0.01 * sin(2 * Double.pi * 260 * t) + 0.05 * sin(2 * Double.pi * 1000 * t) + 0.07 * sin(2 * Double.pi * 4200 * t))
+        }
+        brightPolish.process(&frame)
+    }
+
+    // Muffled mic gets de-mudded + lifted presence; bright thin mic gets warmed + tamed presence
+    #expect(muffledPolish.adaptiveLowGainDB < -0.5)
+    #expect(muffledPolish.adaptiveHighGainDB > 1.0)
+    #expect(brightPolish.adaptiveLowGainDB > 0.3)
+    #expect(brightPolish.adaptiveHighGainDB < 0.0)
+}
+
+@Test func splitBandDeEsserTamesHarshSibilantsWithoutKillingVowels() {
+    var polish = StudioPolish(enabled: true)
+    // Pure harsh 6.5 kHz sibilant burst vs 500 Hz vowel at same amplitude
+    var sib = (0..<9600).map { i in Float(0.08 * sin(2 * Double.pi * 6500 * Double(i) / 48_000)) }
+    polish.process(&sib)
+    let sibOutRMS = sqrt(sib.dropFirst(4800).reduce(0.0) { $0 + Double($1 * $1) } / 4800.0)
+
+    polish.reset()
+    var vowel = (0..<9600).map { i in Float(0.08 * sin(2 * Double.pi * 500 * Double(i) / 48_000)) }
+    polish.process(&vowel)
+    let vowelOutRMS = sqrt(vowel.dropFirst(4800).reduce(0.0) { $0 + Double($1 * $1) } / 4800.0)
+
+    #expect(sibOutRMS < vowelOutRMS * 0.85)  // sharp sibilant tamed noticeably below vowel level
+}
+
+@Test func driftResamplerAbsorbsClockDriftSmoothlyWithoutDrops() {
+    var resampler = DriftResampler(targetFill: 720)
+    // Simulate a mic running +500 ppm fast (producing 480 samples while output consumes ~479.76 samples/hop)
+    var fifo = 720.0
+    var maxStepJump: Float = 0
+    var lastOut: Float = 0
+    for hopIdx in 0..<600 {  // 6 seconds
+        let frame = (0..<480).map { j in
+            let n = hopIdx * 480 + j
+            return Float(0.3 * sin(2 * Double.pi * 440 * Double(n) / 48_000))
+        }
+        let out = resampler.process(frame, currentFill: Int(fifo))
+        for s in out {
+            maxStepJump = max(maxStepJump, abs(s - lastOut))
+            lastOut = s
+        }
+        fifo += Double(out.count) - 479.76
+    }
+    // Stays cleanly bounded near target without hitting overflow (1440) or underflow (0), and zero clicks
+    #expect(fifo > 200 && fifo < 1300)
+    #expect(maxStepJump < 0.05)  // 440 Hz sine at 48 kHz has max natural step ~0.017
+}
