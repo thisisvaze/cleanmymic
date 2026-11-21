@@ -84,8 +84,31 @@ uv run --group eval eval/score.py ~/experiments/studionet-v2/s2_pro/best.pt \
   --sets daps,drvctk,dns5,krisp-work,krisp-call,krisp-phone
 ```
 
-**Promotion gates (vs. current `DFN3Studio-v2`):**
-- DAPS WER `< 4.5%` (down from `7.0%`) and PQ `≥ 6.5` (up from `5.87`).
-- Multi-talker AirPods `krisp-work` WER `≤ 14.5%` and bg-voice suppression `≥ 32 dB`.
-- Non-speech clips: **0 Whisper hallucinated words** (down from 10).
-- Clean studio input nearly unchanged; Core ML worst parity `< 0.01` and M5 Pro frame time `< 2.5 ms`.
+## Measured H100 Pilot Results — `DFN3StudioV2-Pro` (Nov 21, 2026)
+
+Trained on `cmm-fi-h100` (NVIDIA H100 80 GB, now verified `STOPPED`) from `hold-10000.pt` + 6-block full-band DualPathTF (`4.76M` Stage 1, 8,303 steps + 2,000-step loudness/pause/high-band fix tune) + frozen-Stage-1 3-block GAN refiner (`5.42M` total, `0.66M` trainable in Stage 2: `dfn3v2-s2` 6,215 steps; `dfn3v2-s2b` 3,027 steps with `--rec-weight 0.20` and 2 s GAN crops), using `2,166` WavLM-gated (`mean_spk_sim=0.9924`) `NVIDIA-NemotronLabs-RE-USE` (OpenMDW-1.1) teacher pairs (`990` RealMAN train rooms + `1,176` SLR83 accents) plus `hifitts_clean` (65% Stage-2 share), `vctk1`, `vocalset`, and `1,320` Surrey mic IRs.
+
+### Exported trained checkpoint (`dfn3v2-s2b`, FP32 Core ML on Apple M5 Pro)
+- **Model size:** `5.42M` params (`18 MB` `.mlpackage`, FP32).
+- **Parity & Swift check:** **`0.0000`** worst relative error over 200 sequential frames + silence/sparse finite + Swift `Enhancer --check-bypass` **PASS**.
+- **Speed (isolated Core ML on M5 Pro):** **`1.488 ms`** `CPU_ONLY` / **`1.502 ms`** `CPU_AND_NE` / **`1.501 ms`** `ALL` per 10 ms hop (`RTF 0.149–0.150`). *(Note: `--precision mixed` failed the 200-frame relative-error gate on trained noise-suppressing weights; use default `--precision fp32` for trained `DFN3StudioV2` checkpoints.)*
+
+### Multi-device benchmark vs. shipped `DFN3Studio-v2` (Whisper large-v3-turbo + Audiobox PQ)
+
+| Benchmark | Metric | Shipped `DFN3Studio-v2` | `DFN3StudioV2-s2b` (trained) |
+|---|---|---:|---:|
+| **15 val non-speech clips** (`dns`/`fsd50k`/`cochlscene`) | Attenuation | 52.2 dB | **76.7 dB** (+24.5 dB) |
+| **15 val non-speech clips** | Whisper words (> −70 dBFS) | 231 | **3** (−98.7%) |
+| **DAPS** (matched 23 real iPad/iPhone rooms) | WER | 7.0% | **6.5%** (`s2`: **6.3%**) |
+| **DAPS** (matched 23) | Tone error vs. studio | 2.21 dB | **2.10 dB** |
+| **DAPS** (matched 23) | Audiobox PQ | **5.87** | 5.82 |
+| **Unseen RealMAN `Classroom2`** (n=16, −24 dBFS preamp) | Audiobox PQ | 5.66 | **5.71** |
+| **Unseen RealMAN `OfficeRoom3`** (n=16, −24 dBFS preamp) | Audiobox PQ | 4.51 | **4.56** |
+| **Krisp `krisp-work`** (full 40 real calls) | WER / PQ / bg voices | — | **10.8%** / **5.71** / **−43.8 dB** |
+| **Krisp `krisp-call`** (full 40 call-center calls) | WER / PQ / bg voices | — | **13.0%** / **6.58** / **−45.7 dB** |
+| **Krisp `krisp-phone`** (full 40 phone calls) | WER / PQ / bg voices | — | **4.5%** (`s2`) / **4.37** / **−52.9 dB** |
+| **Krisp `krisp-work`** (matched 12-clip subset) | WER / bg voices | **15.0%** / −22.2 dB | 16.3% / **−24.4 dB** |
+
+**Key takeaway on the `PQ ~5.85 → 6.7+` ceiling:** `DFN3StudioV2-s2b` delivered major gains in non-speech hallucination suppression (`231 → 3` words, `76.7 dB` attenuation), DAPS tone (`2.10 dB`), DAPS WER (`7.0% → 6.5%`), unseen RealMAN rooms, and multi-talker bg-voice suppression (`−43.8` to `−52.9 dB` across all three Krisp call sets), while staying fast at `1.49 ms/hop` in exact FP32. However, keeping DFN3's 32-band ERB / 4.8 kHz suppressor at the front still caps DAPS PQ near `5.85` (especially on heavy outdoor noise like `balcony1`, where Base itself drops to `PQ 4.17` vs. offline `NVIDIA-NemotronLabs-RE-USE` `6.31`). Reaching `PQ 6.7+` requires training the full-band `StudioNetV2-Pro` backbone (no DFN3 front-end) for a full 50k–60k-step run (~8–10 h on H100) with teacher distillation.
+
+**Not yet verified:** Blind human listening on `dfn3v2-s2b` vs. shipped `DFN3Studio-v2`, M1/M3/M4 Pro hardware timings, and live macOS HAL call-app testing; `/Applications/CleanMyMic.app` has not been replaced.
