@@ -29,6 +29,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
     private var sink: AVAudioSinkNode!, source: AVAudioSourceNode!
     private var format: AVAudioFormat?, converter: AVAudioConverter?  // the mic's; set only while `mic` is stopped
     private let enhancer: Enhancer  // the worker thread's alone once running
+    private var drift = DriftResampler(targetFill: (3 * hop) / 2)  // worker thread only; absorbs mic/cable clock drift
     private let lock = NSLock()
     private var inFifo: [Float] = [], outFifo: [Float] = [], mix: Float, studioPolish: Bool, running = true, busy = 0.0, frames = 0
     private var delivered = 0
@@ -208,10 +209,12 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
                 let t = Date()
                 let y = (try? enhancer.process(frame)) ?? frame
                 let dt = Date().timeIntervalSince(t)
+                let fill = lock.withLock { outFifo.count }
+                let resampled = drift.process(y, currentFill: fill)
                 lock.withLock {
                     busy += dt
                     frames += 1
-                    outFifo += y
+                    outFifo += resampled
                     if outFifo.count > Self.maxQueued { outFifo.removeFirst(outFifo.count - Self.maxQueued) }
                 }
             }

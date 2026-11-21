@@ -3,9 +3,11 @@
 //   into the neural model's -24 dBFS sweet spot so DFN3's running norms never starve and duck quiet speech.
 // - StudioPolish (post-model):
 //   1. 75 Hz Butterworth high-pass (removes desk thumps, plosives, DC)
-//   2. Subtle studio vocal EQ (gentle 280 Hz de-mud, 3.2 kHz presence, 10 kHz air) when `enabled` is on
-//   3. Speech-gated soft-knee leveler/compressor (never boosts silence/pauses) when `enabled` is on
-//   4. Peak safety limiter (-1 dBTP) when `limitPeaks` is on (prevents Core ML overshoots clipping Core Audio)
+//   2. Speech-gated mic-adaptive broadcast EQ (gently de-muds boomy mics, warms thin earbuds, lifts muffled
+//      laptops, and avoids over-brightening already-bright studio condensers) when `enabled` is on
+//   3. Transparent split-band vocal de-esser (6.5 kHz) that tames harsh sibilants without dulling vowels
+//   4. Speech-gated soft-knee leveler/compressor (never boosts silence/pauses) when `enabled` is on
+//   5. Peak safety limiter (-1 dBTP) when `limitPeaks` is on (prevents Core ML overshoots clipping Core Audio)
 import Foundation
 
 /// Transparent pre-model mic preamp that prevents quiet-mic voice dropouts (e.g. far-field rooms or leaning back).
@@ -84,8 +86,59 @@ nonisolated struct InputPreamp {
     }
 }
 
+/// Transparent micro-rate adaptive resampler for cross-device clock drift (e.g. AirPods / USB mic vs virtual cable).
+/// Nudges output playback rate by at most ±0.2% (±3.5 cents, completely inaudible) to keep the output FIFO centered
+/// around its target fill without ever dropping or zero-padding samples during normal clock drift.
+nonisolated struct DriftResampler {
+    private var prevSample: Float = 0
+    private var phase: Double = 0
+    private var fillEMA: Double
+    private let targetFill: Double
+    private let maxSkew = 0.002  // ±2000 ppm max rate nudge (inaudible, ~20x typical crystal drift)
+
+    init(targetFill: Int = 720) {
+        self.targetFill = Double(targetFill)
+        self.fillEMA = Double(targetFill)
+    }
+
+    mutating func reset() {
+        prevSample = 0
+        phase = 0
+        fillEMA = targetFill
+    }
+
+    /// Resamples one output frame based on current FIFO fill level so the FIFO gently converges to `targetFill`.
+    mutating func process(_ frame: [Float], currentFill: Int) -> [Float] {
+        guard !frame.isEmpty else { return frame }
+        fillEMA += 0.02 * (Double(currentFill) - fillEMA)  // ~0.5 s smoothing at 100 Hz
+        let error = fillEMA - targetFill
+        // Deadzone within ±120 samples (±2.5 ms): exact 1.0x bit-identical passthrough when clocks agree
+        if abs(error) < 120 && phase == 0 {
+            prevSample = frame[frame.count - 1]
+            return frame
+        }
+        // Positive error (FIFO growing) -> step faster (>1.0) to produce slightly fewer samples; negative -> slightly more
+        let step = 1.0 + min(maxSkew, max(-maxSkew, error * 2.5e-6))
+        let n = frame.count
+        var out: [Float] = []
+        out.reserveCapacity(n + 2)
+        var p = phase
+        while p < Double(n) {
+            let idx = Int(floor(p))
+            let frac = Float(p - Double(idx))
+            let s0 = idx <= 0 ? prevSample : frame[idx - 1]
+            let s1 = idx < n ? frame[idx] : frame[n - 1]
+            out.append(s0 + frac * (s1 - s0))
+            p += step
+        }
+        phase = p - Double(n)
+        prevSample = frame[n - 1]
+        return out
+    }
+}
+
 nonisolated struct Biquad {
-    private let b0: Double, b1: Double, b2: Double, a1: Double, a2: Double
+    private var b0: Double, b1: Double, b2: Double, a1: Double, a2: Double
     private var z1 = 0.0, z2 = 0.0
 
     init(b0: Double, b1: Double, b2: Double, a0: Double, a1: Double, a2: Double) {
@@ -96,10 +149,25 @@ nonisolated struct Biquad {
         self.a2 = a2 / a0
     }
 
+    mutating func updateCoefficients(from other: Biquad) {
+        b0 = other.b0
+        b1 = other.b1
+        b2 = other.b2
+        a1 = other.a1
+        a2 = other.a2
+    }
+
     static func highPass(frequency: Double, sampleRate: Double = 48_000, q: Double = 0.7071067811865476) -> Biquad {
         let w0 = 2 * Double.pi * frequency / sampleRate
         let c = cos(w0), alpha = sin(w0) / (2 * q)
         return Biquad(b0: (1 + c) / 2, b1: -(1 + c), b2: (1 + c) / 2,
+                      a0: 1 + alpha, a1: -2 * c, a2: 1 - alpha)
+    }
+
+    static func bandPass(frequency: Double, q: Double, sampleRate: Double = 48_000) -> Biquad {
+        let w0 = 2 * Double.pi * frequency / sampleRate
+        let c = cos(w0), alpha = sin(w0) / (2 * q)
+        return Biquad(b0: alpha, b1: 0, b2: -alpha,
                       a0: 1 + alpha, a1: -2 * c, a2: 1 - alpha)
     }
 
@@ -143,58 +211,156 @@ nonisolated struct Biquad {
 nonisolated struct StudioPolish {
     var enabled: Bool
     var limitPeaks: Bool
+    private let sampleRate: Double
     private var hpf: Biquad
-    private var deMud: Biquad
-    private var presence: Biquad
+    private var lowBandEQ: Biquad
+    private var highBandEQ: Biquad
     private var air: Biquad
+    // Sidechain 3-band speech-balance analyzers + 6.5 kHz de-esser detector
+    private var anaLow: Biquad
+    private var anaMid: Biquad
+    private var anaHigh: Biquad
+    private var sibFilter: Biquad
+    // Slow speech-gated spectral tilt trackers (frozen during pauses/silence)
+    private var lowPow = 0.0
+    private var midPow = 0.0
+    private var highPow = 0.0
+    private var speechSamples = 0
+    private var currentLowDB = -0.8
+    private var currentHighDB = 1.2
+    private var currentAirDB = 0.8
+    // Split-band de-esser envelope
+    private var sibEnv = 0.0
+    private var deEssAtten = 0.0
+    // Dynamics & safety limiter state
     private var rmsEnv = 0.0
     private var compGain = 1.0
     private var limEnv = 0.0
 
-    // Speech-gated compressor constants (48 kHz)
+    // Speech-gated compressor & de-esser constants (48 kHz)
     private let rmsAlpha = exp(-1.0 / (0.025 * 48_000))      // 25 ms RMS window
     private let compAttack = exp(-1.0 / (0.015 * 48_000))    // 15 ms attack
     private let compRelease = exp(-1.0 / (0.180 * 48_000))   // 180 ms release
+    private let sibAttack = exp(-1.0 / (0.003 * 48_000))     // 3 ms sibilant catch
+    private let sibRelease = exp(-1.0 / (0.035 * 48_000))    // 35 ms transparent release
+    private let tiltAlpha = 1.0 - exp(-1.0 / (3.0 * 48_000)) // 3 s speech-gated mic balance EMA
+    private let eqSmooth = 0.06                               // gentle per-frame (~10 ms) EQ coeff glide
     // -1 dBTP peak safety limiter constants (48 kHz)
     private let ceiling = 0.8912509381337456                 // 10^(-1 / 20)
     private let limAttack = exp(-1.0 / (0.0004 * 48_000))    // 0.4 ms fast peak catch
     private let limRelease = exp(-1.0 / (0.045 * 48_000))    // 45 ms transparent release
 
+    /// Exposed for diagnostics/tests: current adaptive EQ gains in dB.
+    var adaptiveLowGainDB: Double { currentLowDB }
+    var adaptiveHighGainDB: Double { currentHighDB }
+
     init(enabled: Bool = true, limitPeaks: Bool = true, sampleRate: Double = 48_000) {
         self.enabled = enabled
         self.limitPeaks = limitPeaks
+        self.sampleRate = sampleRate
         self.hpf = .highPass(frequency: 75, sampleRate: sampleRate)
-        self.deMud = .peaking(frequency: 280, gainDB: -1.5, q: 1.0, sampleRate: sampleRate)
-        self.presence = .peaking(frequency: 3200, gainDB: 2.0, q: 0.9, sampleRate: sampleRate)
-        self.air = .highShelf(frequency: 10_000, gainDB: 1.5, slope: 0.7, sampleRate: sampleRate)
+        self.lowBandEQ = .peaking(frequency: 260, gainDB: -0.8, q: 0.9, sampleRate: sampleRate)
+        self.highBandEQ = .peaking(frequency: 3600, gainDB: 1.2, q: 0.85, sampleRate: sampleRate)
+        self.air = .highShelf(frequency: 10_000, gainDB: 0.8, slope: 0.7, sampleRate: sampleRate)
+        self.anaLow = .bandPass(frequency: 260, q: 0.8, sampleRate: sampleRate)
+        self.anaMid = .bandPass(frequency: 1000, q: 0.8, sampleRate: sampleRate)
+        self.anaHigh = .bandPass(frequency: 4200, q: 0.8, sampleRate: sampleRate)
+        self.sibFilter = .bandPass(frequency: 6500, q: 1.4, sampleRate: sampleRate)
     }
 
     mutating func reset() {
         hpf.reset()
-        deMud.reset()
-        presence.reset()
+        lowBandEQ.reset()
+        highBandEQ.reset()
         air.reset()
+        anaLow.reset()
+        anaMid.reset()
+        anaHigh.reset()
+        sibFilter.reset()
+        lowPow = 0
+        midPow = 0
+        highPow = 0
+        speechSamples = 0
+        currentLowDB = -0.8
+        currentHighDB = 1.2
+        currentAirDB = 0.8
+        lowBandEQ.updateCoefficients(from: .peaking(frequency: 260, gainDB: currentLowDB, q: 0.9, sampleRate: sampleRate))
+        highBandEQ.updateCoefficients(from: .peaking(frequency: 3600, gainDB: currentHighDB, q: 0.85, sampleRate: sampleRate))
+        air.updateCoefficients(from: .highShelf(frequency: 10_000, gainDB: currentAirDB, slope: 0.7, sampleRate: sampleRate))
+        sibEnv = 0
+        deEssAtten = 0
         rmsEnv = 0
         compGain = 1
         limEnv = 0
     }
 
-    /// Processes a 48 kHz frame in place. Peak protection runs when `limitPeaks` is on; EQ + speech-gated leveling run when `enabled`.
+    private mutating func updateAdaptiveEQ() {
+        // Wait for ~0.25 s of active speech before nudging away from neutral startup balance
+        guard speechSamples >= 12_000, midPow > 1e-9 else { return }
+        let lowVsMidDB = 10 * log10((lowPow + 1e-12) / (midPow + 1e-12))
+        let highVsMidDB = 10 * log10((highPow + 1e-12) / (midPow + 1e-12))
+        // Neutral broadcast vocal reference: low (~260 Hz) near -0.5 dB vs 1 kHz, high (~4.2 kHz) near -7.5 dB vs 1 kHz
+        let targetLowDB = min(1.5, max(-2.5, (-0.5 - lowVsMidDB) * 0.35))
+        let targetHighDB = min(2.5, max(-2.0, (-7.5 - highVsMidDB) * 0.35))
+        let targetAirDB = targetHighDB > 0 ? min(1.5, 0.5 + 0.4 * targetHighDB) : max(-1.0, 0.4 * targetHighDB)
+
+        currentLowDB += eqSmooth * (targetLowDB - currentLowDB)
+        currentHighDB += eqSmooth * (targetHighDB - currentHighDB)
+        currentAirDB += eqSmooth * (targetAirDB - currentAirDB)
+
+        lowBandEQ.updateCoefficients(from: .peaking(frequency: 260, gainDB: currentLowDB, q: 0.9, sampleRate: sampleRate))
+        highBandEQ.updateCoefficients(from: .peaking(frequency: 3600, gainDB: currentHighDB, q: 0.85, sampleRate: sampleRate))
+        air.updateCoefficients(from: .highShelf(frequency: 10_000, gainDB: currentAirDB, slope: 0.7, sampleRate: sampleRate))
+    }
+
+    /// Processes a 48 kHz frame in place. Peak protection runs when `limitPeaks` is on; adaptive EQ, de-esser & leveling run when `enabled`.
     mutating func process(_ samples: inout [Float]) {
         guard enabled || limitPeaks else { return }
+        if enabled {
+            updateAdaptiveEQ()
+        }
         for i in samples.indices {
             var x = Double(samples[i])
             if !x.isFinite { x = 0 }
 
             if enabled {
                 x = hpf.process(x)
-                x = deMud.process(x)
-                x = presence.process(x)
-                x = air.process(x)
 
-                // Speech-gated soft-knee compressor: active only above -45 dBFS so silence/pauses stay untouched
+                // Track speech RMS + sidechain mic balance strictly on active speech (> -40 dBFS)
                 rmsEnv = rmsAlpha * rmsEnv + (1 - rmsAlpha) * (x * x)
                 let rms = sqrt(rmsEnv)
+                let aLow = anaLow.process(x)
+                let aMid = anaMid.process(x)
+                let aHigh = anaHigh.process(x)
+                if rms > 0.01 {  // > -40 dBFS: active speech only (pauses never drift EQ)
+                    lowPow += tiltAlpha * (aLow * aLow - lowPow)
+                    midPow += tiltAlpha * (aMid * aMid - midPow)
+                    highPow += tiltAlpha * (aHigh * aHigh - highPow)
+                    if speechSamples < 480_000 { speechSamples += 1 }
+                }
+
+                // Mic-adaptive 3-band broadcast EQ
+                x = lowBandEQ.process(x)
+                x = highBandEQ.process(x)
+                x = air.process(x)
+
+                // Transparent split-band vocal de-esser (6.5 kHz): trims sharp sibilants exceeding speech body
+                let sib = sibFilter.process(x)
+                let asib = abs(sib)
+                let sCoeff = asib > sibEnv ? sibAttack : sibRelease
+                sibEnv = sCoeff * sibEnv + (1 - sCoeff) * asib
+                let targetDeEss: Double
+                if sibEnv > 0.012 && sibEnv > rms * 0.35 {
+                    let excess = (sibEnv - rms * 0.35) / max(sibEnv, 1e-6)
+                    targetDeEss = min(0.45, excess * 0.65)  // up to ~5 dB split-band sibilant trim
+                } else {
+                    targetDeEss = 0
+                }
+                let dCoeff = targetDeEss > deEssAtten ? sibAttack : sibRelease
+                deEssAtten = dCoeff * deEssAtten + (1 - dCoeff) * targetDeEss
+                x -= deEssAtten * sib
+
+                // Speech-gated soft-knee compressor: active only above -45 dBFS so silence/pauses stay untouched
                 let targetGain: Double
                 if rms < 0.005623413 {  // < -45 dBFS: pause/noise floor -> unity gain (no pumping)
                     targetGain = 1.0

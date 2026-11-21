@@ -30,10 +30,8 @@ STUDIO_CLEAN = {
     "packed5/src/vocalset": 0.05,  # 8.8 h, 44.1->48 kHz vocals/breaths (CC BY 4.0)
 }
 STUDIO_CLEAN_POLISH = {
-    "packed5/src/vctk1": 0.50,
-    "packed5/src/slr83": 0.30,
-    "packed5/src/aishell3": 0.15,
-    "packed5/src/vocalset": 0.05,
+    "packed5/src/vctk1": 0.90,
+    "packed5/src/vocalset": 0.10,
 }
 STUDIO_DEHISS = {
     "packed5/src/vctk1",
@@ -158,6 +156,22 @@ def highpass(f, fc=LOW_CUT):
     return s**2 / (s**2 + math.sqrt(2) * w * s + w**2)
 
 
+def align_rirs(rirs):
+    """Shift every RIR so its direct-path peak sits at t=0 (time-shifted anechoic target, RE-USE 2026 §2.1).
+
+    Ensures both synthetic and measured real-room RIR banks (BUT, ACE, Arni) stay time-aligned to dry targets.
+    """
+    peaks = rirs.abs().argmax(dim=1)
+    if (peaks == 0).all():
+        return rirs
+    out = torch.zeros_like(rirs)
+    for i, p in enumerate(peaks.tolist()):
+        rem = rirs.shape[1] - p
+        if rem > 0:
+            out[i, :rem] = rirs[i, p:]
+    return out
+
+
 def by_distance(rirs):
     drr = rirs[:, : SR // 400].pow(2).sum(1) / rirs[:, SR // 400 :].pow(2).sum(1).clamp(
         min=1e-12
@@ -273,31 +287,90 @@ class RealPairPool:
         return xs.to(self.dev, non_blocking=True), ts.to(self.dev, non_blocking=True)
 
 
+class TeacherPairPool:
+    """Verified offline teacher pseudo-pairs (`noisy/<id>.flac` <-> `clean/<id>.flac`, e.g. NemotronLabs RE-USE)."""
+
+    def __init__(self, pairs_dir, device="cpu", max_clips=4000):
+        self.dev = device
+        self.loaded = []
+        root = Path(pairs_dir)
+        noisy_dir, clean_dir = root / "noisy", root / "clean"
+        if not (noisy_dir.exists() and clean_dir.exists()):
+            return
+        for noisy_path in sorted(noisy_dir.iterdir()):
+            if noisy_path.suffix.lower() not in (".flac", ".wav"):
+                continue
+            clean_path = clean_dir / noisy_path.name
+            if not clean_path.exists():
+                clean_path = clean_dir / f"{noisy_path.stem}.flac"
+            if not clean_path.exists():
+                clean_path = clean_dir / f"{noisy_path.stem}.wav"
+            if not clean_path.exists():
+                continue
+            x, sr1 = sf.read(noisy_path, dtype="float32")
+            t, sr2 = sf.read(clean_path, dtype="float32")
+            if x.ndim > 1:
+                x = x[:, 0]
+            if t.ndim > 1:
+                t = t[:, 0]
+            if sr1 != SR:
+                x = resample_poly(x, SR, sr1).astype(np.float32)
+            if sr2 != SR:
+                t = resample_poly(t, SR, sr2).astype(np.float32)
+            n = min(len(x), len(t))
+            if n < SR:
+                continue
+            self.loaded.append(
+                (torch.from_numpy(x[:n].copy()), torch.from_numpy(t[:n].copy()))
+            )
+            if len(self.loaded) >= max_clips:
+                break
+
+    def __len__(self):
+        return len(self.loaded)
+
+    def sample(self, n, seg):
+        xs = torch.zeros(n, seg)
+        ts = torch.zeros(n, seg)
+        for i in range(n):
+            idx = int(torch.randint(len(self.loaded), ()))
+            x, t = self.loaded[idx]
+            if len(x) >= seg:
+                off = int(torch.randint(len(x) - seg + 1, ()))
+                xs[i], ts[i] = x[off : off + seg], t[off : off + seg]
+            else:
+                xs[i, : len(x)], ts[i, : len(t)] = x, t
+        return xs.to(self.dev, non_blocking=True), ts.to(self.dev, non_blocking=True)
+
+
 def _apply_spectral_artifacts(noisy, dev):
-    """Simulate lossy Bluetooth/VoIP codecs, micro-dropouts, and upstream noise-suppressor holes on GPU."""
+    """Simulate lossy Bluetooth HFP/LC3/VoIP codecs, PLC repeats, micro-dropouts, and upstream noise-suppressors."""
     n, seg = noisy.shape
     coin = lambda p: torch.rand(n, 1, device=dev) < p
 
-    # 1) Short packet-loss / Bluetooth micro-dropouts (10-40 ms, 12% of clips)
-    drop_mask = torch.ones(n, seg, device=dev)
-    has_drop = coin(0.12)[:, 0]
+    # 1) Short packet-loss / Bluetooth micro-dropouts & PLC frame repeats (10-40 ms, 14% of clips)
+    has_drop = coin(0.14)[:, 0]
     if has_drop.any():
+        noisy = noisy.clone()
         for i in torch.nonzero(has_drop, as_tuple=False)[:, 0].tolist():
             for _ in range(int(torch.randint(1, 3, ()))):
-                dlen = int(torch.randint(SR // 100, SR // 25, ()))
+                dlen = int(torch.randint(SR // 133, SR // 25, ()))  # 7.5 - 40 ms
                 if dlen < seg:
                     pos = int(torch.randint(0, seg - dlen, ()))
-                    ramp = min(96, dlen // 4)
-                    win = torch.zeros(dlen, device=dev)
-                    if ramp > 0:
-                        r = torch.linspace(1.0, 0.0, ramp, device=dev)
-                        win[:ramp] = r
-                        win[-ramp:] = r.flip(0)
-                    drop_mask[i, pos : pos + dlen] *= win
-    noisy = noisy * drop_mask
+                    if torch.rand(()) < 0.5 and pos >= dlen:
+                        # Bluetooth HFP/LC3 PLC: repeat prior packet with slight attenuation
+                        noisy[i, pos : pos + dlen] = noisy[i, pos - dlen : pos] * 0.85
+                    else:
+                        ramp = min(96, dlen // 4)
+                        win = torch.zeros(dlen, device=dev)
+                        if ramp > 0:
+                            r = torch.linspace(1.0, 0.0, ramp, device=dev)
+                            win[:ramp] = r
+                            win[-ramp:] = r.flip(0)
+                        noisy[i, pos : pos + dlen] *= win
 
-    # 2) Spectral quantization / upstream-suppressor bubble holes (18% of clips)
-    has_art = coin(0.18)[:, 0]
+    # 2) Bluetooth mSBC / LC3 / Opus subband quantization + upstream suppressor gating holes (24% of clips)
+    has_art = coin(0.24)[:, 0]
     if has_art.any():
         win = torch.hann_window(960, device=dev)
         sub = noisy[has_art]
@@ -308,11 +381,29 @@ def _apply_spectral_artifacts(noisy, dev):
         holes = F.interpolate((grid > 0.12).float(), size=(nf, nt), mode="nearest")[
             :, 0
         ]
-        holes[:, :30, :] = 1.0
-        quant_on = torch.rand(m, 1, 1, device=dev) < 0.5
-        thresh = mag.amax((1, 2), keepdim=True) * 0.015
+        holes[:, :24, :] = 1.0
+
+        # Mode A: coarse codec subband magnitude quantization + zeroed quiet bins (mSBC/LC3/low-bitrate Opus)
+        peak_m = mag.amax((1, 2), keepdim=True).clamp(min=1e-6)
+        step = peak_m * torch.empty(m, 1, 1, device=dev).uniform_(0.008, 0.025)
+        q_mag = torch.round(mag / step) * step
+        phase = S / (mag + 1e-8)
+        S_codec = q_mag * phase
+        # Mode B: upstream noise suppressor (Voice Isolation / Zoom DSP): steep >10-11.5 kHz rolloff + consonant gating
+        freqs = torch.fft.rfftfreq(960, 1.0 / SR, device=dev)[None, :, None]
+        sup_cut = torch.empty(m, 1, 1, device=dev).uniform_(9500.0, 11800.0)
+        sup_lp = torch.sigmoid((sup_cut - freqs) / 250.0)
+        sup_gate = torch.where(mag < peak_m * 0.025, 0.12, 1.0)
+        jitter = torch.randn(m, nf, nt, device=dev) * 0.25 * (freqs > 3500.0)
+        S_sup = (
+            S * sup_lp * sup_gate * torch.complex(torch.cos(jitter), torch.sin(jitter))
+        )
+
+        mode_pick = torch.rand(m, 1, 1, device=dev)
         S_mod = torch.where(
-            quant_on & (mag < thresh), S * 0.15, S * (0.2 + 0.8 * holes)
+            mode_pick < 0.40,
+            S_codec,
+            torch.where(mode_pick < 0.72, S_sup, S * (0.2 + 0.8 * holes)),
         )
         noisy = noisy.clone()
         noisy[has_art] = torch.istft(S_mod, 960, 480, window=win, length=seg)
@@ -352,6 +443,7 @@ def make_studio_batch(
     rooms=None,
     mic_irs=None,
     real_pairs=None,
+    teacher_pairs=None,
     hold=0.0,
     clean_prob=0.15,
     bandlim_prob=0.45,
@@ -396,22 +488,13 @@ def make_studio_batch(
         in_room, torch.fft.irfft(S * torch.fft.rfft(rir, n=L), n=L)[:, :seg], speech
     )
     dry_hp = torch.fft.irfft(S * highpass(f, LOW_CUT), n=L)[:, :seg]
-    # Gently clean pure-silence room hum (< -48 dB below target speech, smoothed over 40 ms) so VCTK's -43 dB
-    # studio rumble doesn't teach the model to leave noise haze in pauses; breaths/consonants stay untouched.
-    fr_g = SR // 50  # 20 ms
-    m_len = seg // fr_g * fr_g
-    t_rms = dry_hp[:, :m_len].unflatten(1, (-1, fr_g)).pow(2).mean(2).sqrt()
-    thr = active_rms(dry_hp) * 0.004  # -48 dB below active speech
-    gate_f = (t_rms / (t_rms + thr)).pow(2)
-    gate_f = F.avg_pool1d(gate_f[:, None], 5, 1, 2)[:, 0]  # smooth ~100 ms transitions
-    gate_s = F.interpolate(
-        gate_f[:, None], size=seg, mode="linear", align_corners=False
-    )[:, 0]
-    dry_clean = dry_hp * (0.01 + 0.99 * gate_s)
-    target = dry_clean * (active_rms(rev) / active_rms(dry_clean))
+    # Keep natural studio speech dynamics & direct-path amplitude (rirs are peak-aligned to |rir[0]| == 1.0):
+    # Do NOT rescale target down to active_rms(rev) (reverb tails dilute active_rms by 4-6 dB and teach the model
+    # to crush speech loudness) and do NOT brickwall-gate pauses by -40 dB (causes vacant -120 dB gaps & clipped tails).
+    target = dry_hp
 
     # Background noise (-8..35 dB unvoiced SNR covers loud balcony/cafe noise) + events + babble + competing talkers
-    level = active_rms(rev)
+    level = active_rms(target)
     nz, voiced = noise.sample(n, seg, wrap=True, flags=True)
     snr = torch.where(voiced[:, None], rand(5, 35), rand(-8, 35))
     nz = nz / rms(nz) * level * 10 ** (-snr / 20) * coin(0.80)
@@ -517,6 +600,7 @@ def make_studio_batch(
         noisy = _apply_spectral_artifacts(noisy, dev)
 
     # Real recorded room pairs (RealMAN, ~10% of rows)
+    real_end = 0
     if (
         real_pairs is not None
         and len(real_pairs) > 0
@@ -540,12 +624,51 @@ def make_studio_batch(
             torch.rand(n_real, 1, device=dev) < 0.5
         )
         noisy[:n_real], target[:n_real] = rx, rt
+        real_end = n_real
+
+    # Verified offline teacher pseudo-pairs (e.g. NVIDIA-NemotronLabs-RE-USE OpenMDW-1.1, ~15% of rows)
+    if (
+        teacher_pairs is not None
+        and len(teacher_pairs) > 0
+        and force_bandlim_hz is None
+        and seg <= 12 * SR
+        and real_end < n
+    ):
+        n_tp = min(n - real_end, max(1, (n * 3) // 20))
+        tx, tt = teacher_pairs.sample(n_tp, seg)
+        sc = 10 ** (
+            torch.empty(n_tp, 1, device=dev).uniform_(-42, -16) / 20
+        ) / active_rms(tt)
+        tx, tt = tx * sc, tt * sc
+        f_seg = torch.fft.rfftfreq(seg, 1 / SR, device=dev)
+        tt = torch.fft.irfft(
+            torch.fft.rfft(tt, n=seg) * highpass(f_seg, LOW_CUT),
+            n=seg,
+        )
+        # Augment teacher inputs with optional real noise + mic EQ / BT band-limit while keeping 48k studio target dry
+        tnz = noise.sample(n_tp, seg, wrap=True)
+        tsnr = torch.empty(n_tp, 1, device=dev).uniform_(2, 30)
+        tx = tx + tnz / rms(tnz) * active_rms(tt) * 10 ** (-tsnr / 20) * (
+            torch.rand(n_tp, 1, device=dev) < 0.60
+        )
+        t_eq = 10 ** (random_eq_db(n_tp, f_seg, knots=8, std_db=3.5) / 20)
+        t_lp = torch.where(
+            torch.rand(n_tp, 1, device=dev) < 0.40,
+            torch.sigmoid(
+                (torch.empty(n_tp, 1, device=dev).uniform_(6000.0, 12000.0) - f_seg)
+                / 180.0
+            ),
+            1.0,
+        )
+        t_filt = torch.where(torch.rand(n_tp, 1, device=dev) < 0.50, t_eq, 1.0) * t_lp
+        tx = torch.fft.irfft(torch.fft.rfft(tx, n=seg) * t_filt, n=seg)
+        noisy[real_end : real_end + n_tp], target[real_end : real_end + n_tp] = tx, tt
 
     if clean_prob > 0:
         is_clean = coin(clean_prob)
         noisy = torch.where(is_clean, target, noisy)
 
-    # Pure non-speech noise-only rows (target == 0) so cafes/streets/fans/wind stay silent without hallucinating words
+    # Pure non-speech / distant-chatter zero-target rows (target == 0) so cafes/music/keyboards/wind stay silent
     if noise_only_prob > 0 and force_bandlim_hz is None:
         is_ns = coin(noise_only_prob)
         if is_ns.any():
@@ -553,6 +676,15 @@ def make_studio_batch(
             ns_lvl = 10 ** (rand(-45, -18) / 20)
             ns_sig = ns_bed / rms(ns_bed) * ns_lvl + _wind_gusts(
                 n, seg, ns_lvl, dev
+            ) * coin(0.35)
+            if events is not None:
+                ns_ev = events.sample(n, seg)
+                ns_sig = ns_sig + ns_ev / active_rms(ns_ev) * ns_lvl * 10 ** (
+                    -rand(-3, 12) / 20
+                ) * coin(0.50)
+            # Distant reverberant babble with no primary talker (teaches model not to hallucinate words from cafes/TV)
+            ns_sig = ns_sig + bab / rms(bab) * ns_lvl * 10 ** (
+                -rand(0, 12) / 20
             ) * coin(0.35)
             ns_sig = torch.fft.irfft(
                 (torch.fft.rfft(ns_sig, n=L) * mic + hiss) * lowpass, n=L

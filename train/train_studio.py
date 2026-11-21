@@ -25,7 +25,7 @@ import torch.nn.functional as F
 from torch import nn
 
 import dfn3_studio
-from model import SR, compress
+from model import SR, load as load_ckpt
 from studio_data import (
     EVENT_LEN,
     STUDIO_BEDS,
@@ -35,15 +35,17 @@ from studio_data import (
     STUDIO_EVENTS,
     Pool,
     RealPairPool,
+    TeacherPairPool,
     active_rms,
+    align_rirs,
     by_distance,
     load_mic_irs,
     make_studio_batch,
 )
-from studio_net import StudioNet
+from studio_net import STUDIO_PRESETS, StudioNet, StudioNetV2
 
 SEG = 6 * SR
-GAN_SEG = SR // 2
+GAN_SEG = 2 * SR
 
 
 class STFTDisc(nn.Module):
@@ -242,10 +244,11 @@ class StudioLoss(nn.Module):
     def __init__(
         self,
         asym=0.35,
-        hb_weight=1.5,
+        hb_weight=0.8,
         wav_weight=2.0,
         sdr_weight=0.15,
         tone_weight=0.5,
+        ns_weight=1.5,
         wavlm_weight=0.0,
         wavlm=None,
         device="cuda",
@@ -256,6 +259,7 @@ class StudioLoss(nn.Module):
         self.wav_weight = wav_weight
         self.sdr_weight = sdr_weight
         self.tone_weight = tone_weight
+        self.ns_weight = ns_weight
         self.wavlm_weight = wavlm_weight
         self.wavlm = wavlm
         self.ffts = (256, 512, 1024, 2048, 4096)
@@ -300,10 +304,15 @@ class StudioLoss(nn.Module):
             cplx_l = ((Yc.real - Tc.real).pow(2) + (Yc.imag - Tc.imag).pow(2)).mean()
             spec = spec + 400.0 * (mag_l + 0.5 * cplx_l)
             if n == 1024 and has_speech.any():
+                # Mask 8-24 kHz log-mag loss to active speech frames (symmetric L1) so quiet/unvoiced frames
+                # never get pushed into artificial 12-20 kHz hiss/fuzz.
+                tp_hi = Ts[has_speech].real.pow(2) + Ts[has_speech].imag.pow(2)
+                te_hi = tp_hi.sum(1, keepdim=True)
+                act_hi = (te_hi >= te_hi.amax(-1, keepdim=True) * 0.005).float()
                 y_hi = (_safe_abs(Ys[has_speech, self.hb_lo :]) + 1e-5).log()
                 t_hi = (_safe_abs(Ts[has_speech, self.hb_lo :]) + 1e-5).log()
-                dh = y_hi - t_hi
-                hb = (dh.abs() * (1.0 + 0.5 * self.asym * (dh < 0))).mean()
+                dh = (y_hi - t_hi).abs() * act_hi
+                hb = dh.sum() / (act_hi.sum() * y_hi.shape[1]).clamp(min=1.0)
             if n == 2048 and self.tone_weight > 0 and has_speech.any():
                 Yp = Ys[has_speech].real.pow(2) + Ys[has_speech].imag.pow(2)
                 Tp = Ts[has_speech].real.pow(2) + Ts[has_speech].imag.pow(2)
@@ -322,12 +331,21 @@ class StudioLoss(nn.Module):
             sdr_l = 10.0 * ((err_p + 1e-6) / ref_p).log10().clamp(min=-25.0).mean()
         else:
             sdr_l = torch.tensor(-25.0, device=y.device)
+        ns_l = 0.0
+        if self.ns_weight > 0 and (~has_speech).any():
+            # Push pure non-speech / distant-chatter residual below -55 dB relative to normalized input
+            ns_pow = yn[~has_speech].pow(2).mean(1)
+            ns_db = 10.0 * (ns_pow + 1e-12).log10()
+            ns_l = (
+                F.relu(ns_db + 81.0).mean() / 20.0
+            )  # -26 dBFS input - 55 dB = -81 dBFS floor
         total = (
             spec
             + self.hb_weight * hb
             + self.wav_weight * wav_l
             + self.sdr_weight * (sdr_l + 25.0)
             + self.tone_weight * tone_l
+            + self.ns_weight * ns_l
         )
         wlm = 0.0
         if (
@@ -344,6 +362,7 @@ class StudioLoss(nn.Module):
             "tone": float(tone_l.detach()) if isinstance(tone_l, torch.Tensor) else 0.0,
             "wav": float(wav_l.detach()),
             "sdr": float(-sdr_l.detach()),
+            "ns": float(ns_l.detach()) if isinstance(ns_l, torch.Tensor) else 0.0,
             "wlm": float(wlm.detach()) if isinstance(wlm, torch.Tensor) else 0.0,
         }
 
@@ -396,6 +415,12 @@ def main():
         "--gan-fm", type=float, default=3.0, help="feature-matching loss weight"
     )
     ap.add_argument(
+        "--rec-weight",
+        type=float,
+        default=1.0,
+        help="weight on spectral/waveform regression anchor during Stage-2 GAN (e.g. 0.2 for balanced GAN polish)",
+    )
+    ap.add_argument(
         "--wavlm-weight",
         type=float,
         default=3.0,
@@ -411,6 +436,20 @@ def main():
     ap.add_argument("--mic-irs", help="path to packed Surrey mic IRs .npy")
     ap.add_argument("--real-pairs", help="path to RealMAN paired room train dir")
     ap.add_argument(
+        "--teacher-pairs",
+        help="path to verified offline teacher pairs dir (noisy/ + clean/, e.g. NemotronLabs RE-USE)",
+    )
+    ap.add_argument(
+        "--teacher-ckpt",
+        help="optional online teacher checkpoint (.pt) for student distillation (e.g. Pro -> Lite)",
+    )
+    ap.add_argument(
+        "--distill-weight",
+        type=float,
+        default=0.5,
+        help="distillation loss weight when --teacher-ckpt is provided",
+    )
+    ap.add_argument(
         "--extra-clean",
         help="optional extra packed studio speech pool prefix (e.g. hifitts_clean)",
     )
@@ -423,8 +462,8 @@ def main():
     ap.add_argument(
         "--noise-only-prob",
         type=float,
-        default=0.08,
-        help="share of pure non-speech zero-target rows",
+        default=0.10,
+        help="share of pure non-speech / distant-chatter zero-target rows",
     )
     ap.add_argument(
         "--max-minutes",
@@ -434,8 +473,23 @@ def main():
     )
     ap.add_argument("--val-every", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=20261119)
-    ap.add_argument("--size", choices=("m", "l"), default="l")
-    ap.add_argument("--arch", choices=("studio", "dfn3_studio"), default="studio")
+    ap.add_argument("--size", choices=("lite", "m", "l", "pro", "max"), default="l")
+    ap.add_argument(
+        "--arch",
+        choices=("studio", "studio_v2", "dfn3_studio", "dfn3_studio_v2"),
+        default="studio",
+    )
+    ap.add_argument(
+        "--spk-dim",
+        type=int,
+        default=0,
+        help="optional speaker embedding dim for FiLM conditioning (0 disables)",
+    )
+    ap.add_argument(
+        "--no-freeze-stage1",
+        action="store_true",
+        help="for --arch studio_v2 --gan: do not freeze Stage-1 backbone",
+    )
     ap.add_argument(
         "--base-ckpt",
         help="for --arch dfn3_studio: path to CleanMyMic Base (hold-10000.pt)",
@@ -485,7 +539,7 @@ def main():
         spec(STUDIO_EVENTS), dev, memmap=True, split="val", max_len=EVENT_LEN
     )
 
-    rirs = torch.from_numpy(np.load(root / "packed5" / "rirs.npy")).to(dev)
+    rirs = align_rirs(torch.from_numpy(np.load(root / "packed5" / "rirs.npy")).to(dev))
     rirs_train, rirs_val = rirs[:3800], rirs[3800:]
     rooms_train = by_distance(rirs_train)
     rooms_val = by_distance(rirs_val)
@@ -498,10 +552,42 @@ def main():
             f"Loaded {len(real_pairs)} real paired room clips from {args.real_pairs}",
             flush=True,
         )
+    teacher_pairs = (
+        TeacherPairPool(args.teacher_pairs, device=dev) if args.teacher_pairs else None
+    )
+    if teacher_pairs is not None:
+        print(
+            f"Loaded {len(teacher_pairs)} verified teacher pairs from {args.teacher_pairs}",
+            flush=True,
+        )
+    teacher_model = None
+    if args.teacher_ckpt:
+        teacher_model, _ = load_ckpt(
+            Path(args.teacher_ckpt).expanduser(), map_location=dev
+        )
+        teacher_model = teacher_model.to(dev).eval()
+        for p in teacher_model.parameters():
+            p.requires_grad_(False)
+        print(
+            f"Loaded frozen online teacher {args.teacher_ckpt} "
+            f"({sum(p.numel() for p in teacher_model.parameters()) / 1e6:.2f}M, weight={args.distill_weight})",
+            flush=True,
+        )
 
+    init_state = None
+    if not (run / "last.pt").exists() and args.init:
+        init_state = torch.load(
+            Path(args.init).expanduser(), map_location=dev, weights_only=False
+        )
+
+    freeze_s1 = (
+        args.arch in ("studio_v2", "dfn3_studio_v2")
+        and args.gan
+        and not args.no_freeze_stage1
+    )
     if args.arch == "dfn3_studio":
-        res_ch = (32, 64, 96) if args.size == "l" else (24, 48, 64)
-        n_attn = 3 if args.size == "l" else 2
+        res_ch = (32, 64, 96) if args.size in ("l", "pro", "max") else (24, 48, 64)
+        n_attn = 3 if args.size in ("l", "pro", "max") else 2
         if args.base_ckpt and not (run / "last.pt").exists() and not args.init:
             model = dfn3_studio.init_from_base(
                 Path(args.base_ckpt).expanduser(), res_ch=res_ch, n_attn=n_attn
@@ -512,16 +598,8 @@ def main():
             )
         else:
             spk = 0
-            if args.init:
-                spk = (
-                    torch.load(
-                        Path(args.init).expanduser(),
-                        map_location="cpu",
-                        weights_only=False,
-                    )
-                    .get("config", {})
-                    .get("spk", 0)
-                )
+            if init_state is not None:
+                spk = init_state.get("config", {}).get("spk", 0)
             elif (run / "last.pt").exists():
                 spk = (
                     torch.load(run / "last.pt", map_location="cpu", weights_only=False)
@@ -537,32 +615,95 @@ def main():
             "n_attn": n_attn,
             "spk": model.base.spk,
         }
-    else:
-        if args.size == "m":
-            model_cfg = dict(
-                ch=(32, 48, 64, 96),
-                n_blocks=6,
-                heads=4,
-                global_hidden=256,
-                look=2,
-                past=2,
-                df=True,
+    elif args.arch == "dfn3_studio_v2":
+        s1_ch = (
+            (32, 64, 96, 128) if args.size in ("pro", "max", "l") else (24, 48, 64, 96)
+        )
+        s1_blocks = 8 if args.size == "max" else (6 if args.size in ("pro", "l") else 4)
+        ref_ch = (24, 48, 80, 96)
+        ref_blocks = 3
+        use_refiner = bool(args.gan)
+        if args.base_ckpt and not (run / "last.pt").exists() and not args.init:
+            model = dfn3_studio.init_v2_from_base(
+                Path(args.base_ckpt).expanduser(),
+                s1_ch=s1_ch,
+                s1_blocks=s1_blocks,
+                ref_ch=ref_ch,
+                ref_blocks=ref_blocks,
+                use_refiner=use_refiner,
+            ).to(dev)
+            print(
+                f"Initialized DFN3StudioV2 from Base {args.base_ckpt} (spk={model.base.spk}, use_refiner={use_refiner})",
+                flush=True,
             )
         else:
-            model_cfg = dict(
-                ch=(32, 64, 96, 128),
-                n_blocks=6,
-                heads=4,
-                global_hidden=256,
-                look=2,
-                past=2,
-                df=True,
-            )
+            icfg = {}
+            if init_state is not None:
+                icfg = init_state.get("config", {})
+            elif (run / "last.pt").exists():
+                icfg = torch.load(
+                    run / "last.pt", map_location="cpu", weights_only=False
+                ).get("config", {})
+            s1_ch = tuple(icfg.get("s1_ch", s1_ch))
+            s1_blocks = icfg.get("s1_blocks", s1_blocks)
+            ref_ch = tuple(icfg.get("ref_ch", ref_ch))
+            ref_blocks = icfg.get("ref_blocks", ref_blocks)
+            spk = icfg.get("spk", 0)
+            model = dfn3_studio.DFN3StudioV2(
+                s1_ch=s1_ch,
+                s1_blocks=s1_blocks,
+                ref_ch=ref_ch,
+                ref_blocks=ref_blocks,
+                use_refiner=use_refiner or bool(icfg.get("use_refiner", False)),
+                spk=spk,
+            ).to(dev)
+        config = {
+            "arch": "dfn3_studio_v2",
+            "s1_ch": s1_ch,
+            "s1_blocks": s1_blocks,
+            "ref_ch": ref_ch,
+            "ref_blocks": ref_blocks,
+            "use_refiner": model.use_refiner,
+            "spk": model.base.spk,
+        }
+        if freeze_s1 and model.use_refiner:
+            model.freeze_stage1()
+    elif args.arch == "studio_v2":
+        preset = STUDIO_PRESETS[args.size]
+        s1_cfg = dict(preset["s1"]) | {"spk_dim": args.spk_dim}
+        ref_cfg = dict(preset["ref"])
+        if init_state is not None:
+            icfg = dict(init_state.get("config", {}))
+            if icfg.get("arch") == "studio":
+                icfg.pop("arch", None)
+                s1_cfg = icfg
+            elif icfg.get("arch") == "studio_v2":
+                s1_cfg = dict(icfg["s1_cfg"])
+                ref_cfg = {
+                    k: icfg[k]
+                    for k in ("ref_ch", "ref_blocks", "ref_heads")
+                    if k in icfg
+                }
+        model = StudioNetV2(s1_cfg=s1_cfg, **ref_cfg).to(dev)
+        config = {"arch": "studio_v2", "s1_cfg": s1_cfg} | ref_cfg
+        if freeze_s1:
+            model.freeze_stage1()
+    else:
+        model_cfg = dict(STUDIO_PRESETS[args.size]["s1"]) | {"spk_dim": args.spk_dim}
         config = {"arch": "studio"} | model_cfg
         model = StudioNet(**model_cfg).to(dev)
 
     def set_train_mode():
         model.train()
+        if freeze_s1 and isinstance(model, StudioNetV2):
+            model.stage1.eval()
+        elif (
+            freeze_s1
+            and isinstance(model, dfn3_studio.DFN3StudioV2)
+            and model.use_refiner
+        ):
+            model.base.eval()
+            model.restore.eval()
         # Keep pretrained DFN3 BatchNorm statistics frozen during fine-tuning (critical for Base stability!)
         for m in model.modules():
             if isinstance(m, nn.BatchNorm2d):
@@ -572,19 +713,57 @@ def main():
     crit = StudioLoss(
         asym=args.asym, wavlm_weight=args.wavlm_weight, wavlm=wavlm, device=dev
     ).to(dev)
+    distill_crit = (
+        StudioLoss(
+            asym=0.2,
+            hb_weight=1.0,
+            wav_weight=2.0,
+            sdr_weight=0.1,
+            tone_weight=0.3,
+            ns_weight=0.0,
+            device=dev,
+        ).to(dev)
+        if teacher_model is not None
+        else None
+    )
 
     lr = args.lr or (1e-4 if args.gan else 3e-4)
-    if args.arch == "dfn3_studio":
+    if args.arch == "dfn3_studio" or (
+        args.arch == "dfn3_studio_v2" and not (freeze_s1 and model.use_refiner)
+    ):
         param_groups = [
             {
-                "params": list(model.base.parameters()),
+                "params": [p for p in model.base.parameters() if p.requires_grad],
                 "lr": lr * args.base_lr_mult,
                 "lr_mult": args.base_lr_mult,
             },
-            {"params": list(model.restore.parameters()), "lr": lr, "lr_mult": 1.0},
+            {
+                "params": [
+                    p
+                    for p in list(model.restore.parameters())
+                    + (
+                        list(model.refiner.parameters())
+                        if getattr(model, "refiner", None) is not None
+                        else []
+                    )
+                    if p.requires_grad
+                ],
+                "lr": lr,
+                "lr_mult": 1.0,
+            },
+        ]
+    elif freeze_s1 and isinstance(model, (StudioNetV2, dfn3_studio.DFN3StudioV2)):
+        param_groups = [
+            {"params": list(model.refiner.parameters()), "lr": lr, "lr_mult": 1.0}
         ]
     else:
-        param_groups = [{"params": list(model.parameters()), "lr": lr, "lr_mult": 1.0}]
+        param_groups = [
+            {
+                "params": [p for p in model.parameters() if p.requires_grad],
+                "lr": lr,
+                "lr_mult": 1.0,
+            }
+        ]
     opt = torch.optim.AdamW(param_groups, lr=lr, betas=(0.8, 0.99), weight_decay=1e-4)
     discs = nn.ModuleList(
         [STFTDisc(n) for n in (4096, 2048, 1024, 512, 256)]
@@ -607,18 +786,44 @@ def main():
         best_val = st.get("best_val", float("inf"))
         elapsed_prev = st.get("elapsed_s", 0.0)
         print(f"Resumed {run} at step {step} (best_val={best_val:.4f})", flush=True)
-    elif args.init:
-        st = torch.load(
-            Path(args.init).expanduser(), map_location=dev, weights_only=False
-        )
-        model.load_state_dict(st["model"])
-        print(
-            f"Initialized weights from {args.init} (step {st.get('step', '?')})",
-            flush=True,
-        )
+    elif init_state is not None:
+        if (
+            isinstance(model, StudioNetV2)
+            and init_state.get("config", {}).get("arch") == "studio"
+        ):
+            model.stage1.load_state_dict(init_state["model"])
+            print(
+                f"Loaded Stage-1 weights from {args.init} into StudioNetV2.stage1 "
+                f"(step {init_state.get('step', '?')}, frozen={freeze_s1})",
+                flush=True,
+            )
+        elif (
+            isinstance(model, dfn3_studio.DFN3StudioV2)
+            and model.use_refiner
+            and not init_state.get("config", {}).get("use_refiner", False)
+        ):
+            missing, unexpected = model.load_state_dict(
+                init_state["model"], strict=False
+            )
+            assert not unexpected and all(k.startswith("refiner.") for k in missing), (
+                f"unexpected mismatch loading S1 into DFN3StudioV2: missing={missing[:5]}, unexpected={unexpected[:5]}"
+            )
+            print(
+                f"Loaded Stage-1 weights from {args.init} into DFN3StudioV2 (base+restore frozen={freeze_s1}, "
+                f"step {init_state.get('step', '?')})",
+                flush=True,
+            )
+        else:
+            model.load_state_dict(init_state["model"])
+            print(
+                f"Initialized weights from {args.init} (step {init_state.get('step', '?')})",
+                flush=True,
+            )
 
+    n_tot_p = sum(p.numel() for p in model.parameters()) / 1e6
+    n_trn_p = sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
     print(
-        f"StudioNet-{args.size.upper()}: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M params"
+        f"{args.arch}-{args.size.upper()}: {n_tot_p:.2f}M params ({n_trn_p:.2f}M trainable)"
         + (
             f", discs {sum(p.numel() for p in discs.parameters()) / 1e6:.2f}M"
             if args.gan
@@ -679,6 +884,19 @@ def main():
             clean_prob=0.0,
             bandlim_prob=0.4,
         ),
+        "non_speech": make_studio_batch(
+            clean_val,
+            noise_val,
+            rirs_val,
+            12,
+            SEG,
+            events=events_val,
+            rooms=rooms_val,
+            mic_irs=mic_irs,
+            hold=0.0,
+            clean_prob=0.0,
+            noise_only_prob=1.0,
+        ),
     }
 
     def run_val(cur_step):
@@ -691,9 +909,11 @@ def main():
                     "cuda", dtype=torch.bfloat16, enabled=dev == "cuda"
                 ):
                     vy = model(vx).float()
-                vloss, parts = crit(vy, vt, use_wavlm=(name != "hold"))
+                vloss, parts = crit(
+                    vy, vt, x=vx, use_wavlm=(name not in ("hold", "non_speech"))
+                )
                 full_db, hi_db, peak = spectral_db_metrics(vy, vt)
-                metrics[name] = {
+                row = {
                     "loss": round(float(vloss), 4),
                     "spec": round(parts["spec"], 4),
                     "hb": round(parts["hb"], 4),
@@ -702,6 +922,13 @@ def main():
                     "hi8_20_db": round(hi_db, 3),
                     "peak": round(peak, 3),
                 }
+                if name == "non_speech":
+                    in_p = vx.pow(2).mean(1).clamp(min=1e-12)
+                    out_p = vy.pow(2).mean(1).clamp(min=1e-12)
+                    row["atten_db"] = round(
+                        float((10.0 * (in_p / out_p).log10()).mean()), 2
+                    )
+                metrics[name] = row
                 if name in ("mixed", "bandlim_8k") and cur_step > 0:
                     for i in range(min(2, len(vx))):
                         for kind, arr in (("in", vx), ("out", vy), ("ref", vt)):
@@ -712,12 +939,13 @@ def main():
                                 arr[i].cpu().numpy(),
                                 SR,
                             )
-        # Composite selection score (never selects on GAN loss): mixed + bandlim + clean identity + hold
+        # Composite selection score (never selects on GAN loss): mixed + bandlim + clean identity + hold + non-speech
         sel = (
             metrics["mixed"]["loss"]
             + 0.7 * metrics["bandlim_8k"]["loss"]
             + 0.5 * metrics["clean_id"]["loss"]
             + 0.4 * metrics["hold"]["loss"]
+            + 0.3 * metrics["non_speech"]["loss"]
         )
         metrics["sel"] = round(sel, 4)
         with open(run / "validation.jsonl", "a") as f:
@@ -725,7 +953,8 @@ def main():
         print(
             f"VAL step={cur_step} sel={sel:.4f} mixed={metrics['mixed']['loss']:.3f} "
             f"bwe8k_hi={metrics['bandlim_8k']['hi8_20_db']:.2f}dB "
-            f"clean={metrics['clean_id']['full_db']:.2f}dB hold={metrics['hold']['loss']:.3f}",
+            f"clean={metrics['clean_id']['full_db']:.2f}dB hold={metrics['hold']['loss']:.3f} "
+            f"ns_atten={metrics['non_speech']['atten_db']:.1f}dB",
             flush=True,
         )
         set_train_mode()
@@ -788,6 +1017,7 @@ def main():
                 rooms=rooms_train,
                 mic_irs=mic_irs,
                 real_pairs=real_pairs,
+                teacher_pairs=teacher_pairs,
                 hold=0.25,
                 clean_prob=0.15 if args.gan else 0.12,
                 bandlim_prob=0.50,
@@ -800,14 +1030,37 @@ def main():
 
         # On 30s hold batches skip WavLM to save VRAM/time
         rec, parts = crit(y, t, x=x, use_wavlm=(not is_hold))
-        loss = rec
+        if args.rec_weight != 1.0 and not is_hold:
+            has_sp = t.abs().amax(1) > 1e-4
+            if has_sp.any() and (~has_sp).any():
+                rec_sp, _ = crit(y[has_sp], t[has_sp], x=x[has_sp], use_wavlm=True)
+                rec_ns, _ = crit(y[~has_sp], t[~has_sp], x=x[~has_sp], use_wavlm=False)
+                loss = args.rec_weight * rec_sp + rec_ns
+            elif has_sp.any():
+                loss = args.rec_weight * rec
+            else:
+                loss = rec
+        else:
+            loss = rec
         extra = ""
+
+        # Optional online student-teacher distillation (e.g. StudioNetV2-Pro -> StudioNetV2-Lite)
+        if teacher_model is not None and args.distill_weight > 0 and not is_hold:
+            with torch.no_grad():
+                with torch.autocast(
+                    "cuda", dtype=torch.bfloat16, enabled=dev == "cuda"
+                ):
+                    y_teach = teacher_model(x).float()
+            d_l, _ = distill_crit(y, y_teach, x=x, use_wavlm=False)
+            loss = loss + args.distill_weight * d_l
+            extra += f" kd={d_l.item():.3f}"
 
         if args.gan and not is_hold:
             sp_idx = torch.nonzero(t.abs().amax(1) > 1e-4, as_tuple=False)[:, 0][:16]
             if len(sp_idx) >= 2:
-                i = int(torch.randint(t.shape[1] - GAN_SEG, ()))
-                yc, tc = y[sp_idx, i : i + GAN_SEG], t[sp_idx, i : i + GAN_SEG]
+                gseg = min(GAN_SEG, t.shape[1])
+                i = int(torch.randint(max(1, t.shape[1] - gseg + 1), ()))
+                yc, tc = y[sp_idx, i : i + gseg], t[sp_idx, i : i + gseg]
                 sc = 0.1 / tc.pow(2).mean(1, keepdim=True).sqrt().clamp(min=1e-4)
                 yc, tc = yc * sc, tc * sc
                 d_loss = sum(
@@ -823,14 +1076,15 @@ def main():
                 discs.requires_grad_(False)
                 adv, fm = gan_losses(discs, yc, tc)
                 discs.requires_grad_(True)
-                loss = rec + args.gan_adv * adv + args.gan_fm * fm
-                extra = (
+                loss = loss + args.gan_adv * adv + args.gan_fm * fm
+                extra += (
                     f" adv={adv.item():.3f} fm={fm.item():.3f} d={d_loss.item():.3f}"
                 )
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
-        gn = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.5)
+        trainable = [p for p in model.parameters() if p.requires_grad]
+        gn = torch.nn.utils.clip_grad_norm_(trainable, 1.5)
         if torch.isfinite(gn):
             opt.step()
         else:
