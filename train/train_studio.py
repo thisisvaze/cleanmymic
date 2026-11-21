@@ -244,11 +244,11 @@ class StudioLoss(nn.Module):
     def __init__(
         self,
         asym=0.35,
-        hb_weight=1.5,
+        hb_weight=0.8,
         wav_weight=2.0,
         sdr_weight=0.15,
         tone_weight=0.5,
-        ns_weight=2.0,
+        ns_weight=1.5,
         wavlm_weight=0.0,
         wavlm=None,
         device="cuda",
@@ -304,10 +304,15 @@ class StudioLoss(nn.Module):
             cplx_l = ((Yc.real - Tc.real).pow(2) + (Yc.imag - Tc.imag).pow(2)).mean()
             spec = spec + 400.0 * (mag_l + 0.5 * cplx_l)
             if n == 1024 and has_speech.any():
+                # Mask 8-24 kHz log-mag loss to active speech frames (symmetric L1) so quiet/unvoiced frames
+                # never get pushed into artificial 12-20 kHz hiss/fuzz.
+                tp_hi = Ts[has_speech].real.pow(2) + Ts[has_speech].imag.pow(2)
+                te_hi = tp_hi.sum(1, keepdim=True)
+                act_hi = (te_hi >= te_hi.amax(-1, keepdim=True) * 0.005).float()
                 y_hi = (_safe_abs(Ys[has_speech, self.hb_lo :]) + 1e-5).log()
                 t_hi = (_safe_abs(Ts[has_speech, self.hb_lo :]) + 1e-5).log()
-                dh = y_hi - t_hi
-                hb = (dh.abs() * (1.0 + 0.5 * self.asym * (dh < 0))).mean()
+                dh = (y_hi - t_hi).abs() * act_hi
+                hb = dh.sum() / (act_hi.sum() * y_hi.shape[1]).clamp(min=1.0)
             if n == 2048 and self.tone_weight > 0 and has_speech.any():
                 Yp = Ys[has_speech].real.pow(2) + Ys[has_speech].imag.pow(2)
                 Tp = Ts[has_speech].real.pow(2) + Ts[has_speech].imag.pow(2)

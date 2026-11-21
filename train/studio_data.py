@@ -488,22 +488,13 @@ def make_studio_batch(
         in_room, torch.fft.irfft(S * torch.fft.rfft(rir, n=L), n=L)[:, :seg], speech
     )
     dry_hp = torch.fft.irfft(S * highpass(f, LOW_CUT), n=L)[:, :seg]
-    # Gently clean pure-silence room hum (< -48 dB below target speech, smoothed over 40 ms) so VCTK's -43 dB
-    # studio rumble doesn't teach the model to leave noise haze in pauses; breaths/consonants stay untouched.
-    fr_g = SR // 50  # 20 ms
-    m_len = seg // fr_g * fr_g
-    t_rms = dry_hp[:, :m_len].unflatten(1, (-1, fr_g)).pow(2).mean(2).sqrt()
-    thr = active_rms(dry_hp) * 0.004  # -48 dB below active speech
-    gate_f = (t_rms / (t_rms + thr)).pow(2)
-    gate_f = F.avg_pool1d(gate_f[:, None], 5, 1, 2)[:, 0]  # smooth ~100 ms transitions
-    gate_s = F.interpolate(
-        gate_f[:, None], size=seg, mode="linear", align_corners=False
-    )[:, 0]
-    dry_clean = dry_hp * (0.01 + 0.99 * gate_s)
-    target = dry_clean * (active_rms(rev) / active_rms(dry_clean))
+    # Keep natural studio speech dynamics & direct-path amplitude (rirs are peak-aligned to |rir[0]| == 1.0):
+    # Do NOT rescale target down to active_rms(rev) (reverb tails dilute active_rms by 4-6 dB and teach the model
+    # to crush speech loudness) and do NOT brickwall-gate pauses by -40 dB (causes vacant -120 dB gaps & clipped tails).
+    target = dry_hp
 
     # Background noise (-8..35 dB unvoiced SNR covers loud balcony/cafe noise) + events + babble + competing talkers
-    level = active_rms(rev)
+    level = active_rms(target)
     nz, voiced = noise.sample(n, seg, wrap=True, flags=True)
     snr = torch.where(voiced[:, None], rand(5, 35), rand(-8, 35))
     nz = nz / rms(nz) * level * 10 ** (-snr / 20) * coin(0.80)
