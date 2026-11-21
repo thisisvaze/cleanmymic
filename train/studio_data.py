@@ -649,11 +649,28 @@ def make_studio_batch(
             torch.empty(n_tp, 1, device=dev).uniform_(-42, -16) / 20
         ) / active_rms(tt)
         tx, tt = tx * sc, tt * sc
+        f_seg = torch.fft.rfftfreq(seg, 1 / SR, device=dev)
         tt = torch.fft.irfft(
-            torch.fft.rfft(tt, n=seg)
-            * highpass(torch.fft.rfftfreq(seg, 1 / SR, device=dev), LOW_CUT),
+            torch.fft.rfft(tt, n=seg) * highpass(f_seg, LOW_CUT),
             n=seg,
         )
+        # Augment teacher inputs with optional real noise + mic EQ / BT band-limit while keeping 48k studio target dry
+        tnz = noise.sample(n_tp, seg, wrap=True)
+        tsnr = torch.empty(n_tp, 1, device=dev).uniform_(2, 30)
+        tx = tx + tnz / rms(tnz) * active_rms(tt) * 10 ** (-tsnr / 20) * (
+            torch.rand(n_tp, 1, device=dev) < 0.60
+        )
+        t_eq = 10 ** (random_eq_db(n_tp, f_seg, knots=8, std_db=3.5) / 20)
+        t_lp = torch.where(
+            torch.rand(n_tp, 1, device=dev) < 0.40,
+            torch.sigmoid(
+                (torch.empty(n_tp, 1, device=dev).uniform_(6000.0, 12000.0) - f_seg)
+                / 180.0
+            ),
+            1.0,
+        )
+        t_filt = torch.where(torch.rand(n_tp, 1, device=dev) < 0.50, t_eq, 1.0) * t_lp
+        tx = torch.fft.irfft(torch.fft.rfft(tx, n=seg) * t_filt, n=seg)
         noisy[real_end : real_end + n_tp], target[real_end : real_end + n_tp] = tx, tt
 
     if clean_prob > 0:
