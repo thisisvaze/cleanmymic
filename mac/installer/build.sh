@@ -19,7 +19,7 @@ python3 mac/installer/verify.py
 ./mac/driver/build.sh
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' mac/Info.plist)
 BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' mac/Info.plist)
-RELEASE="$VERSION-alpha.$BUILD"
+RELEASE="$VERSION"
 OUT="$PWD/mac/build/release"
 mkdir -p "$OUT"
 WORK=$(mktemp -d "$PWD/mac/build/installer.XXXXXX")
