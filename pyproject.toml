@@ -1,0 +1,10 @@
+[project]
+name = "cleanmymic"
+version = "0.2.0"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "scipy",
+    "torch",
+    "coremltools; sys_platform == 'darwin'",
+]
