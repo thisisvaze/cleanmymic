@@ -182,3 +182,12 @@ import Testing
                                             leaveVirtualInput: true)
     #expect(fallback == .restore(macMic.id))
 }
+
+@Test func onlyABluetoothMicDelaysTheOutput() {
+    // The wait is for a headset changing to its call profile; on any other mic it was 300 ms of silence per open.
+    #expect(outputDelay(micTransport: kAudioDeviceTransportTypeBluetooth) == 0.3)
+    #expect(outputDelay(micTransport: kAudioDeviceTransportTypeBluetoothLE) == 0.3)
+    #expect(outputDelay(micTransport: kAudioDeviceTransportTypeBuiltIn) == 0)
+    #expect(outputDelay(micTransport: kAudioDeviceTransportTypeUSB) == 0)
+    #expect(outputDelay(micTransport: nil) == 0)
+}

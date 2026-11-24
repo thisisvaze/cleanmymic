@@ -78,6 +78,12 @@ With a Core ML model available locally, you can also run the synthetic bypass/re
 ./mac/live.sh models/CleanMyMicStudio.mlpackage --check-bypass
 ```
 
+With the app installed and running, this times how long the virtual microphone stays silent after an app opens it (it opens your mic for a few seconds):
+
+```sh
+swift mac/micgap.swift
+```
+
 ## Layout
 
 - `mac/` - native SwiftUI menu bar app, Core Audio pipeline, vDSP Studio Polish chain, virtual driver build script and `.pkg` installer
