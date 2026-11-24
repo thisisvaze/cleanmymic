@@ -168,7 +168,7 @@ nonisolated final class Pipeline: @unchecked Sendable {  // shared with audio th
                 try retrying { try wire(mic: true) }
                 // a Bluetooth headset switches to its call profile once its mic opens: wire the output after that
                 // ponytail: a fixed wait; a later switch is still caught by the configuration-change handler
-                Thread.sleep(forTimeInterval: 0.3)
+                Thread.sleep(forTimeInterval: outputDelay(afterOpening: input))
                 try Task.checkCancellation()
                 try retrying { try wire(mic: false) }
             }

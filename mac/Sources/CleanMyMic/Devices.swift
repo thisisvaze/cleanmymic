@@ -148,6 +148,14 @@ private nonisolated func hiddenDevice(uid: String) -> AudioDeviceID? {
 
 nonisolated func isBuiltIn(_ id: AudioDeviceID) -> Bool { transport(id) == kAudioDeviceTransportTypeBuiltIn }
 
+/// How long to wait between opening a mic and starting the output. A Bluetooth headset switches to its call
+/// profile once its mic opens, which stops an engine already playing to it; no other mic changes anything.
+nonisolated func outputDelay(micTransport: UInt32?) -> TimeInterval {
+    micTransport == kAudioDeviceTransportTypeBluetooth || micTransport == kAudioDeviceTransportTypeBluetoothLE ? 0.3 : 0
+}
+
+nonisolated func outputDelay(afterOpening mic: AudioDeviceID) -> TimeInterval { outputDelay(micTransport: transport(mic)) }
+
 private nonisolated func transport(_ id: AudioDeviceID) -> UInt32? {
     var addr = address(kAudioDevicePropertyTransportType)
     var transport = UInt32(0)

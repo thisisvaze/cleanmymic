@@ -3,10 +3,28 @@
 // The window and spectrum compression come from the package's metadata: ours or DeepFilterNet3.
 import Accelerate
 import CoreML
+import Synchronization
 
 nonisolated let win = 960, hop = 480, bins = 481
 
 nonisolated final class Enhancer {
+    /// A model loaded ahead of use (about 17 MB while it waits). Loading takes 40 ms, or 300 ms when the file has
+    /// not been read for a while, and all of that is silence at the start of a call or dictation.
+    /// Unchecked: a Core ML model is for one thread at a time, so it is handed over whole and never shared. The
+    /// next Enhancer for that file takes it out of `ready`.
+    private struct Loaded: @unchecked Sendable {
+        let url: URL, model: MLModel
+    }
+
+    private static let ready = Mutex<Loaded?>(nil)
+
+    /// Loads the model at `url` and runs it once, for the next `Enhancer(url)` to pick up.
+    static func preload(_ url: URL) throws {
+        if ready.withLock({ $0?.url == url }) { return }
+        let model = try Enhancer(url).model  // that Enhancer is gone after this line: nothing else holds the model
+        ready.withLock { $0 = Loaded(url: url, model: model) }
+    }
+
     let model: MLModel
     var state: [String: MLMultiArray] = [:]  // every input but x (GRU h, deep-filter buf), fed back from "<name>_out"
     let window: [Float], c: Float  // c: the model's spectrum exponent (1: plain spectrum)
@@ -21,7 +39,13 @@ nonisolated final class Enhancer {
 
     /// A compiled .mlmodelc (the app bundles these) or an .mlpackage (compiled here).
     init(_ url: URL) throws {
-        model = try MLModel(contentsOf: url.pathExtension == "mlmodelc" ? url : try MLModel.compileModel(at: url))
+        let waiting = Self.ready.withLock { kept in
+            guard kept?.url == url else { return Loaded?.none }
+            defer { kept = nil }
+            return kept
+        }
+        model = try waiting?.model
+            ?? MLModel(contentsOf: url.pathExtension == "mlmodelc" ? url : try MLModel.compileModel(at: url))
         for (name, desc) in model.modelDescription.inputDescriptionsByName where name != "x" {
             let a = try MLMultiArray(shape: desc.multiArrayConstraint!.shape, dataType: .float32)
             for i in 0..<a.count { a[i] = 0 }

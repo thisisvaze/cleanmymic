@@ -271,7 +271,11 @@ final class Controller {
             destination = output.id
             consumerActive = try otherAppIsRecording(from: mic.id)
             if testing && (consumerActive || testBlocker != nil) { testing = false; return }  // didSet restarts
-            guard consumerActive || testing else { status = "Ready"; return }
+            guard consumerActive || testing else {
+                status = "Ready"
+                Task { await Self.preload(model) }  // while idle, so the next mic open does not wait for it
+                return
+            }
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
             guard gen == generation else { return }
             guard granted else {
@@ -333,6 +337,10 @@ final class Controller {
         try p.start()
         return p
     }
+
+    /// Loading a Core ML model takes up to seconds: never on the main actor.
+    @concurrent
+    private nonisolated static func preload(_ model: URL) async { try? Enhancer.preload(model) }
 
     @concurrent
     private nonisolated static func onDevices(_ p: Pipeline) async -> Bool { p.onIntendedDevices }
