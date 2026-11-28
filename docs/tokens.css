@@ -1,0 +1,45 @@
+:root {
+  color-scheme: light dark;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", ui-monospace, Consolas, monospace;
+
+  --color-page: oklch(97% .004 90);
+  --color-surface: oklch(99.5% .002 90);
+  --color-ink: oklch(22% .007 90);
+  --color-secondary: oklch(46% .007 90);
+  --color-muted: oklch(52% .007 90);
+  --color-line: oklch(90% .006 90);
+  --color-accent: oklch(26% .007 90);
+  --color-accent-ink: oklch(99.5% .002 90);
+  --color-accent-hover: oklch(36% .007 90);
+  --color-accent-soft: oklch(93.5% .005 90);
+  --color-active: oklch(52% .16 255);
+  --color-active-ink: #fff;
+  --color-focus: oklch(30% .007 90);
+
+  --page-gutter: clamp(16px, 4vw, 48px);
+  --page-max: 68rem;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 99px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-page: oklch(16% .005 90);
+    --color-surface: oklch(20.5% .006 90);
+    --color-ink: oklch(94% .005 90);
+    --color-secondary: oklch(76% .006 90);
+    --color-muted: oklch(68% .006 90);
+    --color-line: oklch(29% .006 90);
+    --color-accent: oklch(93% .005 90);
+    --color-accent-ink: oklch(18% .006 90);
+    --color-accent-hover: oklch(84% .005 90);
+    --color-accent-soft: oklch(26% .006 90);
+    --color-active: oklch(60% .17 255);
+    --color-active-ink: #fff;
+    --color-focus: oklch(93% .005 90);
+  }
+}
